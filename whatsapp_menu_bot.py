@@ -5,19 +5,19 @@ Built for BITSoM - Kamba Weekly Mess Menu:
 • Pre-loaded with this week's menu (19/10/26 to 25/10/26) so it works immediately!
 • Connects to your PERSONAL WhatsApp via QR Code ("Linked Devices") — 100% Free,
   no Twilio/Meta account needed, no 24-hour messaging limits.
-• Texts your "Message Yourself (You)" chat automatically in IST:
+• Texts your "Message Yourself (You)" chat (or a solo "Mess Menu" group) in IST:
     - 06:00 AM : Breakfast
     - 11:00 AM : Lunch (including Bowled Over & Food Trotters)
     - 03:00 PM : Evening Snacks (including Jain Snack & Hot Beverage)
     - 07:00 PM : Dinner (including Perfect Jodi / Bowled Over)
     - 09:00 AM (Mondays) : Reminder to send the new week's Excel (.xlsx) file
-• On Mondays, just drop the new `.xlsx` file into your "Message Yourself" chat on
-  WhatsApp to update the whole week!
-• Text your "Message Yourself" chat anytime with:
+• On Mondays, just drop the new `.xlsx` file into your chat on WhatsApp to update!
+• Text anytime with:
     - "menu" or "today" -> Full day's menu (all 4 meals)
     - "breakfast", "lunch", "snacks", or "dinner" -> Specific meal for today
     - "next" -> Next upcoming meal
     - "tomorrow" or any weekday (e.g. "thursday", "friday lunch", "sunday dinner")
+    - Or prefix with "!" in any chat (e.g. "!menu", "!breakfast", "!lunch")
 """
 
 import argparse
@@ -1019,8 +1019,8 @@ def add_bridge_log(entry: str):
     ts = datetime.now(TIMEZONE).strftime("%H:%M:%S")
     with STATE_LOCK:
         BRIDGE_STATE["recent_logs"].append(f"[{ts}] {entry}")
-        if len(BRIDGE_STATE["recent_logs"]) > 15:
-            BRIDGE_STATE["recent_logs"] = BRIDGE_STATE["recent_logs"][-15:]
+        if len(BRIDGE_STATE["recent_logs"]) > 25:
+            BRIDGE_STATE["recent_logs"] = BRIDGE_STATE["recent_logs"][-25:]
 
 
 # ---------------------------------------------------------------------------
@@ -1316,7 +1316,7 @@ def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -
     if cleaned in ("help", "commands", "bot", "hi", "hello", "test"):
         return (
             "👋 *BITSoM Mess Menu Bot*\n"
-            "Text any of these keywords in your *Message Yourself* chat:\n"
+            "Text any of these keywords in your chat:\n"
             "• *menu* or *today* — Full menu for today (all 4 meals)\n"
             "• *breakfast*, *lunch*, *snacks*, or *dinner* — Specific meal for today\n"
             "• *next* — The next upcoming meal\n"
@@ -1354,7 +1354,9 @@ def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -
 def queue_whatsapp_message(text: str):
     with STATE_LOCK:
         BRIDGE_STATE["outbox"].append(text)
-    add_bridge_log(f"Queued outbound message ({len(text)} chars)")
+        connected = BRIDGE_STATE["connected"]
+    status_note = "bridge connected" if connected else "waiting for QR scan / reconnect"
+    add_bridge_log(f"Queued outbound message ({len(text)} chars) [{status_note}]")
     logger.info("Queued WhatsApp message (%d chars)", len(text))
 
 
@@ -1381,7 +1383,7 @@ def scheduler_loop():
                     queue_whatsapp_message(
                         "⏰ *Monday Menu Reminder!*\n"
                         "Please drop this week's new Mess Menu Excel (`.xlsx`) file here in your "
-                        "*Message Yourself* chat so I can update your daily alerts!"
+                        "chat so I can update your daily alerts!"
                     )
 
         # 2. Scheduled Meal Texts (06:00, 11:00, 15:00, 19:00 IST)
@@ -1400,10 +1402,17 @@ def scheduler_loop():
 
 
 # ---------------------------------------------------------------------------
-# Way 1: Auto-Generated Node.js Baileys QR-Code Bridge (Supports @lid & append)
+# Way 1: Auto-Generated Node.js Baileys QR-Code Bridge (v2 - With Timeouts)
 # ---------------------------------------------------------------------------
 NODE_BRIDGE_SCRIPT = r"""
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, downloadMediaMessage } = require('@whiskeysockets/baileys');
+const {
+    default: makeWASocket,
+    useMultiFileAuthState,
+    DisconnectReason,
+    downloadMediaMessage,
+    fetchLatestBaileysVersion,
+    makeCacheableSignalKeyStore
+} = require('@whiskeysockets/baileys');
 const QRCode = require('qrcode');
 const pino = require('pino');
 const http = require('http');
@@ -1411,6 +1420,11 @@ const http = require('http');
 const PY_PORT = process.env.PORT || 10000;
 const processedMsgIds = new Set();
 let learnedSelfChatJid = null;
+let activeSock = null;
+let isConnected = false;
+let currentPhone = '';
+let currentLid = '';
+let isSendingOutbox = false;
 
 function postToPython(path, payload) {
     return new Promise((resolve) => {
@@ -1434,6 +1448,28 @@ function postToPython(path, payload) {
     });
 }
 
+function logToPython(msg) {
+    console.log(msg);
+    postToPython('/internal/log', { message: msg }).catch(() => {});
+}
+
+function withTimeout(promise, ms, label) {
+    return Promise.race([
+        promise,
+        new Promise((_, reject) =>
+            setTimeout(() => reject(new Error(label + ' timed out after ' + (ms / 1000) + 's')), ms)
+        )
+    ]);
+}
+
+// Prevent any transient Baileys error from crashing the Node bridge process
+process.on('uncaughtException', (err) => {
+    logToPython('⚠️ Bridge caught exception: ' + (err?.message || String(err)));
+});
+process.on('unhandledRejection', (reason) => {
+    logToPython('⚠️ Bridge caught rejection: ' + (reason?.message || String(reason)));
+});
+
 // Unwraps ephemeralMessage, deviceSentMessage, viewOnceMessage, etc.
 function unwrapMessage(m) {
     if (!m) return null;
@@ -1447,116 +1483,238 @@ function unwrapMessage(m) {
 
 function stripJidUser(jid) {
     if (!jid) return '';
-    return jid.split('@')[0].split(':')[0];
+    return String(jid).split('@')[0].split(':')[0];
 }
+
+function extractTimestampSeconds(ts) {
+    if (!ts) return 0;
+    if (typeof ts === 'number') return ts;
+    if (typeof ts === 'object' && typeof ts.low === 'number') return ts.low;
+    const parsed = Number(ts);
+    return Number.isNaN(parsed) ? 0 : parsed;
+}
+
+// Sends a message to your personal chat with a strict 12s timeout per target
+async function sendToSelfChat(text) {
+    if (!activeSock || !isConnected) {
+        throw new Error('WhatsApp socket is not connected right now');
+    }
+
+    // Priority order:
+    // 1. Exact chat JID learned from a message you typed (e.g. your "You" chat or solo group)
+    // 2. Your standard phone JID (@s.whatsapp.net) FIRST
+    // 3. Your LID JID (@lid) as fallback
+    const targets = [];
+    if (learnedSelfChatJid) {
+        targets.push(learnedSelfChatJid);
+    } else {
+        if (currentPhone) targets.push(currentPhone + '@s.whatsapp.net');
+        if (currentLid) targets.push(currentLid + '@lid');
+    }
+
+    if (targets.length === 0) {
+        throw new Error('No self JID available yet');
+    }
+
+    let deliveredJid = null;
+    let lastErr = null;
+
+    for (const jid of targets) {
+        try {
+            logToPython('⏳ Sending message (' + text.length + ' chars) to ' + jid + '...');
+            await withTimeout(
+                activeSock.sendMessage(jid, { text: '\u200B' + text }),
+                12000,
+                'sendMessage(' + jid + ')'
+            );
+            deliveredJid = jid;
+            break; // Stop as soon as the primary target succeeds!
+        } catch (err) {
+            lastErr = err;
+            logToPython('⚠️ Send to ' + jid + ' failed: ' + (err?.message || String(err)));
+        }
+    }
+
+    if (!deliveredJid) {
+        throw lastErr || new Error('All send targets failed');
+    }
+    return deliveredJid;
+}
+
+// Single global outbox poller (never duplicated across reconnects)
+setInterval(async () => {
+    if (!isConnected || !activeSock || isSendingOutbox) return;
+    isSendingOutbox = true;
+    try {
+        const res = await postToPython('/internal/outbox_peek', {});
+        if (res.messages && res.messages.length > 0) {
+            for (const m of res.messages) {
+                const usedJid = await sendToSelfChat(m);
+                await postToPython('/internal/outbox_pop', {
+                    delivered_to: usedJid,
+                    chars: m.length,
+                });
+            }
+        }
+    } catch (err) {
+        logToPython('❌ Outbox delivery error (will retry): ' + (err?.message || String(err)));
+    } finally {
+        isSendingOutbox = false;
+    }
+}, 4000);
 
 async function startWhatsApp() {
     const { state, saveCreds } = await useMultiFileAuthState('./wa_auth_session');
+    const silentLogger = pino({ level: 'silent' });
+
+    let waVersion = undefined;
+    try {
+        const vInfo = await withTimeout(fetchLatestBaileysVersion(), 6000, 'fetchLatestBaileysVersion');
+        waVersion = vInfo.version;
+        logToPython('ℹ️ Using WhatsApp Web version: ' + waVersion.join('.'));
+    } catch (e) {
+        logToPython('ℹ️ Using default bundled WhatsApp Web version');
+    }
+
+    const authConfig = {
+        creds: state.creds,
+        keys: typeof makeCacheableSignalKeyStore === 'function'
+            ? makeCacheableSignalKeyStore(state.keys, silentLogger)
+            : state.keys,
+    };
+
     const sock = makeWASocket({
-        auth: state,
-        logger: pino({ level: 'silent' }),
+         ...(waVersion ? { version: waVersion } : {}),
+        auth: authConfig,
+        logger: silentLogger,
         printQRInTerminal: true,
         syncFullHistory: false,
+        keepAliveIntervalMs: 20000,
+        defaultQueryTimeoutMs: 15000,
+        getMessage: async () => ({ conversation: 'BITSoM Mess Menu' }),
     });
+    activeSock = sock;
 
     sock.ev.on('creds.update', saveCreds);
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
         if (qr) {
+            isConnected = false;
             const qrUrl = await QRCode.toDataURL(qr);
             await postToPython('/internal/status', { connected: false, qr_data_url: qrUrl });
         }
         if (connection === 'open') {
-            const myPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
-            const myLid = stripJidUser(sock.user?.lid || state.creds?.me?.lid);
-            const myJid = myPhone + '@s.whatsapp.net';
-            console.log('✅ Connected to personal WhatsApp:', myJid, 'LID:', myLid);
+            currentPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
+            currentLid = stripJidUser(sock.user?.lid || state.creds?.me?.lid);
+            const myJid = currentPhone + '@s.whatsapp.net';
+            isConnected = true;
+            console.log('✅ Connected to personal WhatsApp:', myJid, 'LID:', currentLid);
             await postToPython('/internal/status', {
                 connected: true,
                 qr_data_url: null,
                 self_jid: myJid,
-                self_lid: myLid ? (myLid + '@lid') : null,
+                self_lid: currentLid ? (currentLid + '@lid') : null,
             });
         }
         if (connection === 'close') {
+            isConnected = false;
             const code = lastDisconnect?.error?.output?.statusCode;
             await postToPython('/internal/status', { connected: false });
             if (code !== DisconnectReason.loggedOut) {
                 setTimeout(startWhatsApp, 4000);
+            } else {
+                logToPython('⚠️ WhatsApp session logged out. Please re-scan QR code.');
             }
         }
     });
 
-    // Listen for messages/files in your "Message Yourself (You)" chat
-    // Note: Messages typed on your phone arrive on Linked Devices with type === 'append' or 'notify'
+    // Listen for messages/files in your "Message Yourself (You)" chat OR a solo group
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify' && type !== 'append') return;
 
         for (const msg of messages) {
-            if (!msg.message || !msg.key) continue;
-            const msgId = msg.key.id;
-            if (!msgId || processedMsgIds.has(msgId)) continue;
+            try {
+                if (!msg.message || !msg.key) continue;
+                const msgId = msg.key.id;
+                if (!msgId || processedMsgIds.has(msgId)) continue;
 
-            // Ignore old history messages (> 90 seconds old)
-            const msgTs = Number(msg.messageTimestamp || 0);
-            const nowSec = Math.floor(Date.now() / 1000);
-            if (msgTs > 0 && (nowSec - msgTs) > 90) continue;
+                // Ignore old history messages (> 120 seconds old)
+                const msgTs = extractTimestampSeconds(msg.messageTimestamp);
+                const nowSec = Math.floor(Date.now() / 1000);
+                if (msgTs > 0 && (nowSec - msgTs) > 120) continue;
 
-            const remoteJid = msg.key.remoteJid || '';
-            if (!remoteJid || remoteJid === 'status@broadcast' || remoteJid.endsWith('@g.us')) continue;
+                const remoteJid = msg.key.remoteJid || '';
+                if (!remoteJid || remoteJid === 'status@broadcast') continue;
 
-            const content = unwrapMessage(msg.message);
-            if (!content) continue;
+                const content = unwrapMessage(msg.message);
+                if (!content) continue;
 
-            const text = (
-                content.conversation ||
-                content.extendedTextMessage?.text ||
-                content.imageMessage?.caption ||
-                content.documentMessage?.caption ||
-                ''
-            ).trim();
+                const text = (
+                    content.conversation ||
+                    content.extendedTextMessage?.text ||
+                    content.imageMessage?.caption ||
+                    content.documentMessage?.caption ||
+                    ''
+                ).trim();
 
-            // Ignore the bot's own replies (prefixed with zero-width space \u200B)
-            if (text.startsWith('\u200B')) {
+                // Ignore the bot's own replies (prefixed with zero-width space \u200B)
+                if (text.startsWith('\u200B')) {
+                    processedMsgIds.add(msgId);
+                    continue;
+                }
+
+                const myPhone = currentPhone || stripJidUser(sock.user?.id || state.creds?.me?.id);
+                const myLid = currentLid || stripJidUser(sock.user?.lid || state.creds?.me?.lid);
+                const remoteUser = stripJidUser(remoteJid);
+                const destJid = msg.message?.deviceSentMessage?.destinationJid || '';
+                const destUser = stripJidUser(destJid);
+
+                const isSelfJid = (
+                    !remoteJid.endsWith('@g.us') && (
+                        (myPhone && (remoteUser === myPhone || destUser === myPhone)) ||
+                        (myLid && (remoteUser === myLid || destUser === myLid)) ||
+                        (learnedSelfChatJid && remoteJid === learnedSelfChatJid)
+                    )
+                );
+
+                // Match menu commands typed by you (fromMe) in your "You" chat or with "!" prefix in any chat/solo group
+                const cleanedLower = text.toLowerCase().replace(/[?!.,'’]/g, '').trim();
+                const hasBangPrefix = text.trim().startsWith('!');
+                const commandWords = new Set([
+                    'menu', 'today', 'todays', 'all', 'full', 'breakfast', 'bf',
+                    'lunch', 'snacks', 'snack', 'dinner', 'next', 'now', 'tomorrow',
+                    'tmrw', 'trotters', 'jodi', 'monday', 'tuesday', 'wednesday',
+                    'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'wed',
+                    'thu', 'fri', 'sat', 'sun', 'help', 'commands', 'bot', 'test'
+                ]);
+                const tokens = cleanedLower.split(/\s+/);
+                const isMenuCommand = (
+                    tokens.length >= 1 &&
+                    tokens.length <= 3 &&
+                    tokens.some(t => commandWords.has(t))
+                );
+
+                // Allow if:
+                // 1) It's your self-chat, OR
+                // 2) You typed a menu command in a 1-on-1/self chat (not a group), OR
+                // 3) You typed a "!" command (e.g. !menu) in a solo group, OR it's the learned chat
+                const isAllowed = (
+                    isSelfJid ||
+                    (msg.key.fromMe && !remoteJid.endsWith('@g.us') && isMenuCommand) ||
+                    (msg.key.fromMe && hasBangPrefix && isMenuCommand) ||
+                    (learnedSelfChatJid && remoteJid === learnedSelfChatJid)
+                );
+
+                if (!isAllowed) continue;
+
+                learnedSelfChatJid = remoteJid;
                 processedMsgIds.add(msgId);
-                continue;
-            }
 
-            const myPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
-            const myLid = stripJidUser(sock.user?.lid || state.creds?.me?.lid);
-            const remoteUser = stripJidUser(remoteJid);
-            const destJid = msg.message?.deviceSentMessage?.destinationJid || '';
-            const destUser = stripJidUser(destJid);
-
-            const isSelfJid = (
-                (myPhone && (remoteUser === myPhone || destUser === myPhone)) ||
-                (myLid && (remoteUser === myLid || destUser === myLid)) ||
-                (learnedSelfChatJid && remoteJid === learnedSelfChatJid)
-            );
-
-            // Also allow exact single-phrase menu commands sent by you (fromMe) in case WhatsApp uses an unannounced @lid
-            const exactSelfCommands = new Set([
-                'menu', 'today', 'todays menu', 'today menu', 'all', 'full', 'full menu',
-                'breakfast', 'bf', 'lunch', 'snacks', 'snack', 'dinner', 'next', 'now',
-                'tomorrow', 'tmrw', 'food trotters', 'trotters', 'perfect jodi', 'jodi',
-                'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday',
-                'mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun', 'help', 'commands', 'bot',
-                '!menu', '!today', '!breakfast', '!lunch', '!snacks', '!dinner', '!next'
-            ]);
-            const cleanedLower = text.toLowerCase().replace(/[?!.,'’]/g, '').trim();
-            const isFromMeCommand = Boolean(msg.key.fromMe && exactSelfCommands.has(cleanedLower));
-
-            if (!isSelfJid && !isFromMeCommand) continue;
-
-            // Remember this JID as your "You" chat for future messages & scheduled alerts
-            learnedSelfChatJid = remoteJid;
-            processedMsgIds.add(msgId);
-
-            // 1. Check if an Excel (.xlsx) document was dropped into the chat
-            const doc = content.documentMessage;
-            if (doc && (doc.fileName?.endsWith('.xlsx') || doc.mimetype?.includes('spreadsheet') || doc.mimetype?.includes('excel'))) {
-                try {
+                // 1. Check if an Excel (.xlsx) document was dropped into the chat
+                const doc = content.documentMessage;
+                if (doc && (doc.fileName?.endsWith('.xlsx') || doc.mimetype?.includes('spreadsheet') || doc.mimetype?.includes('excel'))) {
+                    logToPython('📥 Downloading uploaded Excel file from ' + remoteJid + '...');
                     const buffer = await downloadMediaMessage(msg, 'buffer', {});
                     const res = await postToPython('/internal/upload_xlsx', {
                         filename: doc.fileName || 'menu.xlsx',
@@ -1564,39 +1722,36 @@ async function startWhatsApp() {
                         remote_jid: remoteJid,
                     });
                     if (res.reply) {
-                        await sock.sendMessage(remoteJid, { text: '\u200B' + res.reply });
+                        await withTimeout(
+                            sock.sendMessage(remoteJid, { text: '\u200B' + res.reply }),
+                            12000,
+                            'sendMessage(excel_reply)'
+                        );
+                        logToPython('✅ Sent Excel update confirmation to ' + remoteJid);
                     }
-                } catch (err) {
-                    console.error('Excel download error:', err);
+                    continue;
                 }
-                continue;
-            }
 
-            // 2. Handle text query
-            if (text) {
-                const res = await postToPython('/internal/query', {
-                    text: text,
-                    remote_jid: remoteJid,
-                });
-                if (res.reply) {
-                    await sock.sendMessage(remoteJid, { text: '\u200B' + res.reply });
+                // 2. Handle text query
+                if (text) {
+                    const res = await postToPython('/internal/query', {
+                        text: text,
+                        remote_jid: remoteJid,
+                    });
+                    if (res.reply) {
+                        await withTimeout(
+                            sock.sendMessage(remoteJid, { text: '\u200B' + res.reply }),
+                            12000,
+                            'sendMessage(query_reply)'
+                        );
+                        logToPython('✅ Delivered reply for "' + text + '" to ' + remoteJid);
+                    }
                 }
+            } catch (err) {
+                logToPython('❌ Message handler error: ' + (err?.message || String(err)));
             }
         }
     });
-
-    // Poll Python outbox every 4 seconds for scheduled 6am/11am/3pm/7pm messages & test sends
-    setInterval(async () => {
-        if (!sock.user) return;
-        const myPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
-        const targetJid = learnedSelfChatJid || (myPhone + '@s.whatsapp.net');
-        const res = await postToPython('/internal/outbox', {});
-        if (res.messages && res.messages.length > 0) {
-            for (const m of res.messages) {
-                await sock.sendMessage(targetJid, { text: '\u200B' + m });
-            }
-        }
-    }, 4000);
 }
 
 startWhatsApp();
@@ -1604,7 +1759,7 @@ startWhatsApp();
 
 
 def start_node_qr_bridge():
-    """Writes wa_bridge.js, installs Baileys if needed, and starts the WhatsApp QR bridge."""
+    """Writes wa_bridge.js, installs Baileys if needed, and supervises the WhatsApp QR bridge."""
     with open("wa_bridge.js", "w", encoding="utf-8") as f:
         f.write(NODE_BRIDGE_SCRIPT.strip())
 
@@ -1615,8 +1770,15 @@ def start_node_qr_bridge():
             check=False,
         )
 
-    logger.info("Starting WhatsApp QR-Code Bridge process...")
-    subprocess.Popen(["node", "wa_bridge.js"])
+    while True:
+        logger.info("Starting WhatsApp QR-Code Bridge process...")
+        add_bridge_log("🚀 Starting WhatsApp QR bridge process (v2)...")
+        proc = subprocess.Popen(["node", "wa_bridge.js"])
+        exit_code = proc.wait()
+        with STATE_LOCK:
+            BRIDGE_STATE["connected"] = False
+        add_bridge_log(f"⚠️ WhatsApp bridge exited (code {exit_code}), restarting in 3s...")
+        time.sleep(3)
 
 
 # ---------------------------------------------------------------------------
@@ -1657,11 +1819,12 @@ class BotWebServer(BaseHTTPRequestHandler):
             qr_url = BRIDGE_STATE["qr_data_url"]
             self_jid = BRIDGE_STATE["self_jid"] or ""
             logs_list = list(BRIDGE_STATE["recent_logs"])
+            outbox_count = len(BRIDGE_STATE["outbox"])
 
         logs_html = html.escape("\n".join(logs_list)) if logs_list else "No messages processed yet."
         sent_banner = (
             '<div style="background:#dbeafe;color:#1e40af;padding:12px;border-radius:8px;margin-bottom:16px;">'
-            '📨 <b>Test message queued!</b> Check your WhatsApp "Message Yourself (You)" chat in 5 seconds.'
+            '📨 <b>Test message queued!</b> Watch the Activity Log below (refresh in 5 seconds) to see delivery confirmation.'
             '</div>'
             if "sent=1" in self.path else ""
         )
@@ -1669,8 +1832,9 @@ class BotWebServer(BaseHTTPRequestHandler):
         if connected:
             status_html = f"""
             <div style="background:#dcfce7;color:#166534;padding:16px;border-radius:10px;margin-bottom:20px;">
-                <strong>🟢 Connected to Your Personal WhatsApp!</strong> ({html.escape(self_jid)})<br>
-                Open WhatsApp on your phone, go to your <b>"Message Yourself (You)"</b> chat, and text <code>menu</code>, <code>breakfast</code>, <code>lunch</code>, <code>snacks</code>, or <code>dinner</code>!<br><br>
+                <strong>🟢 Connected to Your Personal WhatsApp! (Bridge v2)</strong> ({html.escape(self_jid)})<br>
+                <small><b>Pending in Outbox: {outbox_count}</b></small><br>
+                Open WhatsApp on your phone, go to your <b>"Message Yourself (You)"</b> chat (or create a solo group and type <code>!menu</code>), and text <code>menu</code>, <code>breakfast</code>, <code>lunch</code>, <code>snacks</code>, or <code>dinner</code>!<br><br>
                 <a href="/send-test" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:600;">📲 Send Test Menu to My WhatsApp Now</a>
             </div>
             """
@@ -1687,7 +1851,7 @@ class BotWebServer(BaseHTTPRequestHandler):
         else:
             status_html = """
             <div style="background:#e0f2fe;color:#075985;padding:16px;border-radius:10px;margin-bottom:20px;">
-                ⏳ Starting WhatsApp QR generator... (Refresh in a few seconds)
+                ⏳ Reconnecting to WhatsApp / Generating QR code... (Page refreshes every 5 seconds)
             </div>
             <script>setTimeout(() => location.reload(), 5000);</script>
             """
@@ -1707,18 +1871,18 @@ class BotWebServer(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="card">
-        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu WhatsApp Bot</h2>
+        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu WhatsApp Bot (v2)</h2>
         {sent_banner}
         {status_html}
         <p><b>Daily Schedule (IST):</b> Breakfast 06:00 AM • Lunch 11:00 AM • Snacks 03:00 PM • Dinner 07:00 PM • Monday Upload Reminder 09:00 AM</p>
     </div>
     <div class="card">
-        <h3 style="margin-top:0;">📅 Today's Loaded Menu Preview ({today_key})</h3>
-        <pre>{today_preview}</pre>
-    </div>
-    <div class="card">
         <h3 style="margin-top:0;">🔍 Recent Bot Activity Log</h3>
         <pre>{logs_html}</pre>
+    </div>
+    <div class="card">
+        <h3 style="margin-top:0;">📅 Today's Loaded Menu Preview ({today_key})</h3>
+        <pre>{today_preview}</pre>
     </div>
 </body>
 </html>"""
@@ -1747,12 +1911,26 @@ class BotWebServer(BaseHTTPRequestHandler):
                     BRIDGE_STATE["self_lid"] = data["self_lid"]
             if data.get("connected"):
                 add_bridge_log(f"Connected to WhatsApp ({data.get('self_jid')}, LID={data.get('self_lid')})")
+            elif "connected" in data and not data.get("connected") and not data.get("qr_data_url"):
+                add_bridge_log("WhatsApp connection closed, reconnecting...")
 
-        elif self.path == "/internal/outbox":
+        elif self.path == "/internal/log":
+            msg = data.get("message", "")
+            if msg:
+                add_bridge_log(msg)
+
+        elif self.path == "/internal/outbox_peek":
             with STATE_LOCK:
-                msgs = list(BRIDGE_STATE["outbox"])
-                BRIDGE_STATE["outbox"].clear()
+                msgs = list(BRIDGE_STATE["outbox"][:1])
             response_payload = {"messages": msgs}
+
+        elif self.path == "/internal/outbox_pop":
+            with STATE_LOCK:
+                if BRIDGE_STATE["outbox"]:
+                    BRIDGE_STATE["outbox"].pop(0)
+            delivered_to = data.get("delivered_to", "WhatsApp")
+            chars = data.get("chars", 0)
+            add_bridge_log(f"✅ Delivered outbound message ({chars} chars) -> {delivered_to}")
 
         elif self.path == "/internal/query":
             text = data.get("text", "")
@@ -1760,8 +1938,6 @@ class BotWebServer(BaseHTTPRequestHandler):
             add_bridge_log(f"Received query '{text}' from {r_jid}")
             menu_data = get_active_menu_data()
             reply = resolve_user_query(text, menu_data, datetime.now(TIMEZONE))
-            if reply:
-                add_bridge_log(f"Replied to '{text}' ({len(reply)} chars)")
             response_payload = {"reply": reply}
 
         elif self.path == "/internal/upload_xlsx":
