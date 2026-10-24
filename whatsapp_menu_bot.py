@@ -1,23 +1,23 @@
 """
-WhatsApp Personal Mess Menu Bot — Way 1 (QR-Code Linked Device + Free Cloud Server)
-===================================================================================
+WhatsApp Mess Menu Bot — Strictly for Your "Mess Menu" WhatsApp Group (v3)
+==========================================================================
 Built for BITSoM - Kamba Weekly Mess Menu:
 • Pre-loaded with this week's menu (19/10/26 to 25/10/26) so it works immediately!
-• Connects to your PERSONAL WhatsApp via QR Code ("Linked Devices") — 100% Free,
-  no Twilio/Meta account needed, no 24-hour messaging limits.
-• Texts your "Message Yourself (You)" chat (or a solo "Mess Menu" group) in IST:
+• Connects to your WhatsApp via QR Code ("Linked Devices") — 100% Free.
+• STRICTLY & EXCLUSIVELY operates inside the WhatsApp group named "Mess Menu"
+  (never messages your personal "You" chat or any other chat/group).
+• Automatically posts to the "Mess Menu" group in IST:
     - 06:00 AM : Breakfast
     - 11:00 AM : Lunch (including Bowled Over & Food Trotters)
     - 03:00 PM : Evening Snacks (including Jain Snack & Hot Beverage)
     - 07:00 PM : Dinner (including Perfect Jodi / Bowled Over)
-    - 09:00 AM (Mondays) : Reminder to send the new week's Excel (.xlsx) file
-• On Mondays, just drop the new `.xlsx` file into your chat on WhatsApp to update!
-• Text anytime with:
+    - 09:00 AM (Mondays) : Reminder to drop the new week's Excel (.xlsx) file
+• On Mondays, just drop the new `.xlsx` file into the "Mess Menu" group to update!
+• Anyone in the "Mess Menu" group can text anytime:
     - "menu" or "today" -> Full day's menu (all 4 meals)
     - "breakfast", "lunch", "snacks", or "dinner" -> Specific meal for today
     - "next" -> Next upcoming meal
     - "tomorrow" or any weekday (e.g. "thursday", "friday lunch", "sunday dinner")
-    - Or prefix with "!" in any chat (e.g. "!menu", "!breakfast", "!lunch")
 """
 
 import argparse
@@ -42,6 +42,7 @@ import openpyxl
 TIMEZONE = ZoneInfo("Asia/Kolkata")
 MENU_FILE_PATH = os.environ.get("MENU_FILE_PATH", "current_menu.xlsx")
 PORT = int(os.environ.get("PORT", 10000))
+TARGET_GROUP_NAME = "Mess Menu"
 
 # Daily notification schedule (24-hour format in IST)
 MEAL_SCHEDULE = {
@@ -1008,8 +1009,9 @@ BRIDGE_STATE = {
     "connected": False,
     "qr_data_url": None,
     "self_jid": None,
-    "self_lid": None,
-    "outbox": [],  # Queued outbound messages to send to your personal WhatsApp
+    "group_jid": None,
+    "group_name": None,
+    "outbox": [],  # Queued outbound messages to send exclusively to "Mess Menu"
     "recent_logs": [],
 }
 STATE_LOCK = threading.Lock()
@@ -1283,7 +1285,7 @@ def get_next_upcoming_meal(now_ist: datetime) -> tuple[str, str]:
 
 
 # ---------------------------------------------------------------------------
-# On-Demand Query Resolver ("Request that day's menu whenever I want")
+# On-Demand Query Resolver (Strictly for the "Mess Menu" Group)
 # ---------------------------------------------------------------------------
 def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -> str | None:
     cleaned = incoming_text.strip().lower()
@@ -1313,10 +1315,10 @@ def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -
     if "perfect jodi" in cleaned or "jodi" in cleaned:
         return format_meal_message(menu_data, today_key, "dinner")
 
-    if cleaned in ("help", "commands", "bot", "hi", "hello", "test"):
+    if cleaned in ("help", "commands", "bot"):
         return (
-            "👋 *BITSoM Mess Menu Bot*\n"
-            "Text any of these keywords in your chat:\n"
+            "👋 *BITSoM Mess Menu Bot (\"Mess Menu\" Group)*\n"
+            "Text any of these keywords in this group:\n"
             "• *menu* or *today* — Full menu for today (all 4 meals)\n"
             "• *breakfast*, *lunch*, *snacks*, or *dinner* — Specific meal for today\n"
             "• *next* — The next upcoming meal\n"
@@ -1349,13 +1351,14 @@ def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -
 
 
 # ---------------------------------------------------------------------------
-# Queue Outbound WhatsApp Message to Personal Number
+# Queue Outbound WhatsApp Message to the "Mess Menu" Group
 # ---------------------------------------------------------------------------
 def queue_whatsapp_message(text: str):
     with STATE_LOCK:
         BRIDGE_STATE["outbox"].append(text)
         connected = BRIDGE_STATE["connected"]
-    status_note = "bridge connected" if connected else "waiting for QR scan / reconnect"
+        group_jid = BRIDGE_STATE["group_jid"]
+    status_note = f"target={group_jid}" if (connected and group_jid) else "waiting for 'Mess Menu' group discovery"
     add_bridge_log(f"Queued outbound message ({len(text)} chars) [{status_note}]")
     logger.info("Queued WhatsApp message (%d chars)", len(text))
 
@@ -1382,8 +1385,8 @@ def scheduler_loop():
                 if is_menu_outdated(menu_data, now_ist.date()):
                     queue_whatsapp_message(
                         "⏰ *Monday Menu Reminder!*\n"
-                        "Please drop this week's new Mess Menu Excel (`.xlsx`) file here in your "
-                        "chat so I can update your daily alerts!"
+                        "Please drop this week's new Mess Menu Excel (`.xlsx`) file here in the "
+                        "*Mess Menu* group so I can update your daily alerts!"
                     )
 
         # 2. Scheduled Meal Texts (06:00, 11:00, 15:00, 19:00 IST)
@@ -1402,7 +1405,7 @@ def scheduler_loop():
 
 
 # ---------------------------------------------------------------------------
-# Way 1: Auto-Generated Node.js Baileys QR-Code Bridge (v2 - With Timeouts)
+# Auto-Generated Node.js Baileys QR-Code Bridge (v3 - Strictly "Mess Menu" Group)
 # ---------------------------------------------------------------------------
 NODE_BRIDGE_SCRIPT = r"""
 const {
@@ -1418,12 +1421,14 @@ const pino = require('pino');
 const http = require('http');
 
 const PY_PORT = process.env.PORT || 10000;
+const TARGET_GROUP_NAME = 'mess menu';
 const processedMsgIds = new Set();
-let learnedSelfChatJid = null;
+const groupSubjectCache = new Map();
+
+let messMenuGroupJid = null;
+let messMenuGroupTitle = null;
 let activeSock = null;
 let isConnected = false;
-let currentPhone = '';
-let currentLid = '';
 let isSendingOutbox = false;
 
 function postToPython(path, payload) {
@@ -1462,7 +1467,6 @@ function withTimeout(promise, ms, label) {
     ]);
 }
 
-// Prevent any transient Baileys error from crashing the Node bridge process
 process.on('uncaughtException', (err) => {
     logToPython('⚠️ Bridge caught exception: ' + (err?.message || String(err)));
 });
@@ -1470,7 +1474,6 @@ process.on('unhandledRejection', (reason) => {
     logToPython('⚠️ Bridge caught rejection: ' + (reason?.message || String(reason)));
 });
 
-// Unwraps ephemeralMessage, deviceSentMessage, viewOnceMessage, etc.
 function unwrapMessage(m) {
     if (!m) return null;
     if (m.ephemeralMessage?.message) return unwrapMessage(m.ephemeralMessage.message);
@@ -1494,51 +1497,90 @@ function extractTimestampSeconds(ts) {
     return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-// Sends a message to your personal chat with a strict 12s timeout per target
-async function sendToSelfChat(text) {
+function isTargetGroupName(subject) {
+    if (!subject) return false;
+    return String(subject).trim().toLowerCase() === TARGET_GROUP_NAME;
+}
+
+// Scans all WhatsApp groups the user is in to find the one named "Mess Menu"
+async function discoverMessMenuGroup(sock) {
+    try {
+        const groups = await withTimeout(sock.groupFetchAllParticipating(), 15000, 'groupFetchAllParticipating');
+        const allGroups = Object.values(groups || {});
+        for (const g of allGroups) {
+            if (g && g.id && g.subject) {
+                groupSubjectCache.set(g.id, g.subject);
+                if (isTargetGroupName(g.subject)) {
+                    messMenuGroupJid = g.id;
+                    messMenuGroupTitle = g.subject;
+                    await postToPython('/internal/status', {
+                        group_jid: messMenuGroupJid,
+                        group_name: messMenuGroupTitle,
+                    });
+                    logToPython('🎯 Found target group "' + g.subject + '" (' + g.id + ')');
+                    return g.id;
+                }
+            }
+        }
+        logToPython('⚠️ No WhatsApp group named "Mess Menu" found yet (checked ' + allGroups.length + ' groups).');
+    } catch (err) {
+        logToPython('⚠️ Group scan warning: ' + (err?.message || String(err)));
+    }
+    return messMenuGroupJid;
+}
+
+// Checks whether a given group JID is the "Mess Menu" group
+async function isMessMenuGroupJid(sock, remoteJid) {
+    if (!remoteJid || !remoteJid.endsWith('@g.us')) return false;
+    if (messMenuGroupJid && remoteJid === messMenuGroupJid) return true;
+
+    let subject = groupSubjectCache.get(remoteJid);
+    if (!subject) {
+        try {
+            const meta = await withTimeout(sock.groupMetadata(remoteJid), 8000, 'groupMetadata');
+            if (meta && meta.subject) {
+                subject = meta.subject;
+                groupSubjectCache.set(remoteJid, subject);
+            }
+        } catch (e) {
+            return false;
+        }
+    }
+
+    if (isTargetGroupName(subject)) {
+        messMenuGroupJid = remoteJid;
+        messMenuGroupTitle = subject;
+        await postToPython('/internal/status', {
+            group_jid: messMenuGroupJid,
+            group_name: messMenuGroupTitle,
+        });
+        logToPython('🎯 Locked onto target group "' + subject + '" (' + remoteJid + ')');
+        return true;
+    }
+    return false;
+}
+
+// Sends a message strictly and exclusively to the "Mess Menu" group
+async function sendToMessMenuGroup(text) {
     if (!activeSock || !isConnected) {
         throw new Error('WhatsApp socket is not connected right now');
     }
 
-    // Priority order:
-    // 1. Exact chat JID learned from a message you typed (e.g. your "You" chat or solo group)
-    // 2. Your standard phone JID (@s.whatsapp.net) FIRST
-    // 3. Your LID JID (@lid) as fallback
-    const targets = [];
-    if (learnedSelfChatJid) {
-        targets.push(learnedSelfChatJid);
-    } else {
-        if (currentPhone) targets.push(currentPhone + '@s.whatsapp.net');
-        if (currentLid) targets.push(currentLid + '@lid');
+    if (!messMenuGroupJid) {
+        await discoverMessMenuGroup(activeSock);
     }
 
-    if (targets.length === 0) {
-        throw new Error('No self JID available yet');
+    if (!messMenuGroupJid) {
+        throw new Error('Group "Mess Menu" not found yet — please create or send a message in the "Mess Menu" group');
     }
 
-    let deliveredJid = null;
-    let lastErr = null;
-
-    for (const jid of targets) {
-        try {
-            logToPython('⏳ Sending message (' + text.length + ' chars) to ' + jid + '...');
-            await withTimeout(
-                activeSock.sendMessage(jid, { text: '\u200B' + text }),
-                12000,
-                'sendMessage(' + jid + ')'
-            );
-            deliveredJid = jid;
-            break; // Stop as soon as the primary target succeeds!
-        } catch (err) {
-            lastErr = err;
-            logToPython('⚠️ Send to ' + jid + ' failed: ' + (err?.message || String(err)));
-        }
-    }
-
-    if (!deliveredJid) {
-        throw lastErr || new Error('All send targets failed');
-    }
-    return deliveredJid;
+    logToPython('⏳ Sending message (' + text.length + ' chars) to "' + (messMenuGroupTitle || 'Mess Menu') + '" (' + messMenuGroupJid + ')...');
+    await withTimeout(
+        activeSock.sendMessage(messMenuGroupJid, { text: '\u200B' + text }),
+        15000,
+        'sendMessage(Mess Menu)'
+    );
+    return (messMenuGroupTitle || 'Mess Menu') + ' (' + messMenuGroupJid + ')';
 }
 
 // Single global outbox poller (never duplicated across reconnects)
@@ -1549,15 +1591,15 @@ setInterval(async () => {
         const res = await postToPython('/internal/outbox_peek', {});
         if (res.messages && res.messages.length > 0) {
             for (const m of res.messages) {
-                const usedJid = await sendToSelfChat(m);
+                const usedTarget = await sendToMessMenuGroup(m);
                 await postToPython('/internal/outbox_pop', {
-                    delivered_to: usedJid,
+                    delivered_to: usedTarget,
                     chars: m.length,
                 });
             }
         }
     } catch (err) {
-        logToPython('❌ Outbox delivery error (will retry): ' + (err?.message || String(err)));
+        logToPython('❌ Outbox delivery waiting: ' + (err?.message || String(err)));
     } finally {
         isSendingOutbox = false;
     }
@@ -1584,7 +1626,7 @@ async function startWhatsApp() {
     };
 
     const sock = makeWASocket({
-         ...(waVersion ? { version: waVersion } : {}),
+        ...(waVersion ? { version: waVersion } : {}),
         auth: authConfig,
         logger: silentLogger,
         printQRInTerminal: true,
@@ -1605,17 +1647,17 @@ async function startWhatsApp() {
             await postToPython('/internal/status', { connected: false, qr_data_url: qrUrl });
         }
         if (connection === 'open') {
-            currentPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
-            currentLid = stripJidUser(sock.user?.lid || state.creds?.me?.lid);
+            const currentPhone = stripJidUser(sock.user?.id || state.creds?.me?.id);
             const myJid = currentPhone + '@s.whatsapp.net';
             isConnected = true;
-            console.log('✅ Connected to personal WhatsApp:', myJid, 'LID:', currentLid);
+            console.log('✅ Connected to WhatsApp:', myJid);
             await postToPython('/internal/status', {
                 connected: true,
                 qr_data_url: null,
                 self_jid: myJid,
-                self_lid: currentLid ? (currentLid + '@lid') : null,
             });
+            // Automatically scan groups for "Mess Menu"
+            await discoverMessMenuGroup(sock);
         }
         if (connection === 'close') {
             isConnected = false;
@@ -1629,7 +1671,42 @@ async function startWhatsApp() {
         }
     });
 
-    // Listen for messages/files in your "Message Yourself (You)" chat OR a solo group
+    // Detect if user creates or renames a group to "Mess Menu"
+    sock.ev.on('groups.upsert', async (newGroups) => {
+        for (const g of (newGroups || [])) {
+            if (g && g.id && g.subject) {
+                groupSubjectCache.set(g.id, g.subject);
+                if (isTargetGroupName(g.subject)) {
+                    messMenuGroupJid = g.id;
+                    messMenuGroupTitle = g.subject;
+                    await postToPython('/internal/status', {
+                        group_jid: messMenuGroupJid,
+                        group_name: messMenuGroupTitle,
+                    });
+                    logToPython('🎯 Detected new target group "' + g.subject + '" (' + g.id + ')');
+                }
+            }
+        }
+    });
+
+    sock.ev.on('groups.update', async (updates) => {
+        for (const u of (updates || [])) {
+            if (u && u.id && u.subject) {
+                groupSubjectCache.set(u.id, u.subject);
+                if (isTargetGroupName(u.subject)) {
+                    messMenuGroupJid = u.id;
+                    messMenuGroupTitle = u.subject;
+                    await postToPython('/internal/status', {
+                        group_jid: messMenuGroupJid,
+                        group_name: messMenuGroupTitle,
+                    });
+                    logToPython('🎯 Updated target group "' + u.subject + '" (' + u.id + ')');
+                }
+            }
+        }
+    });
+
+    // Listen ONLY for messages & Excel files inside the "Mess Menu" group
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
         if (type !== 'notify' && type !== 'append') return;
 
@@ -1645,7 +1722,12 @@ async function startWhatsApp() {
                 if (msgTs > 0 && (nowSec - msgTs) > 120) continue;
 
                 const remoteJid = msg.key.remoteJid || '';
-                if (!remoteJid || remoteJid === 'status@broadcast') continue;
+                // STRICT FILTER: Ignore all non-group chats (never reply to personal/self chats)
+                if (!remoteJid.endsWith('@g.us')) continue;
+
+                // STRICT FILTER: Only respond if the group is named "Mess Menu"
+                const isTargetGroup = await isMessMenuGroupJid(sock, remoteJid);
+                if (!isTargetGroup) continue;
 
                 const content = unwrapMessage(msg.message);
                 if (!content) continue;
@@ -1664,57 +1746,12 @@ async function startWhatsApp() {
                     continue;
                 }
 
-                const myPhone = currentPhone || stripJidUser(sock.user?.id || state.creds?.me?.id);
-                const myLid = currentLid || stripJidUser(sock.user?.lid || state.creds?.me?.lid);
-                const remoteUser = stripJidUser(remoteJid);
-                const destJid = msg.message?.deviceSentMessage?.destinationJid || '';
-                const destUser = stripJidUser(destJid);
-
-                const isSelfJid = (
-                    !remoteJid.endsWith('@g.us') && (
-                        (myPhone && (remoteUser === myPhone || destUser === myPhone)) ||
-                        (myLid && (remoteUser === myLid || destUser === myLid)) ||
-                        (learnedSelfChatJid && remoteJid === learnedSelfChatJid)
-                    )
-                );
-
-                // Match menu commands typed by you (fromMe) in your "You" chat or with "!" prefix in any chat/solo group
-                const cleanedLower = text.toLowerCase().replace(/[?!.,'’]/g, '').trim();
-                const hasBangPrefix = text.trim().startsWith('!');
-                const commandWords = new Set([
-                    'menu', 'today', 'todays', 'all', 'full', 'breakfast', 'bf',
-                    'lunch', 'snacks', 'snack', 'dinner', 'next', 'now', 'tomorrow',
-                    'tmrw', 'trotters', 'jodi', 'monday', 'tuesday', 'wednesday',
-                    'thursday', 'friday', 'saturday', 'sunday', 'mon', 'tue', 'wed',
-                    'thu', 'fri', 'sat', 'sun', 'help', 'commands', 'bot', 'test'
-                ]);
-                const tokens = cleanedLower.split(/\s+/);
-                const isMenuCommand = (
-                    tokens.length >= 1 &&
-                    tokens.length <= 3 &&
-                    tokens.some(t => commandWords.has(t))
-                );
-
-                // Allow if:
-                // 1) It's your self-chat, OR
-                // 2) You typed a menu command in a 1-on-1/self chat (not a group), OR
-                // 3) You typed a "!" command (e.g. !menu) in a solo group, OR it's the learned chat
-                const isAllowed = (
-                    isSelfJid ||
-                    (msg.key.fromMe && !remoteJid.endsWith('@g.us') && isMenuCommand) ||
-                    (msg.key.fromMe && hasBangPrefix && isMenuCommand) ||
-                    (learnedSelfChatJid && remoteJid === learnedSelfChatJid)
-                );
-
-                if (!isAllowed) continue;
-
-                learnedSelfChatJid = remoteJid;
                 processedMsgIds.add(msgId);
 
-                // 1. Check if an Excel (.xlsx) document was dropped into the chat
+                // 1. Check if an Excel (.xlsx) document was dropped into the "Mess Menu" group
                 const doc = content.documentMessage;
                 if (doc && (doc.fileName?.endsWith('.xlsx') || doc.mimetype?.includes('spreadsheet') || doc.mimetype?.includes('excel'))) {
-                    logToPython('📥 Downloading uploaded Excel file from ' + remoteJid + '...');
+                    logToPython('📥 Downloading uploaded Excel file from "Mess Menu" group...');
                     const buffer = await downloadMediaMessage(msg, 'buffer', {});
                     const res = await postToPython('/internal/upload_xlsx', {
                         filename: doc.fileName || 'menu.xlsx',
@@ -1724,15 +1761,15 @@ async function startWhatsApp() {
                     if (res.reply) {
                         await withTimeout(
                             sock.sendMessage(remoteJid, { text: '\u200B' + res.reply }),
-                            12000,
+                            15000,
                             'sendMessage(excel_reply)'
                         );
-                        logToPython('✅ Sent Excel update confirmation to ' + remoteJid);
+                        logToPython('✅ Sent Excel update confirmation to "Mess Menu" group');
                     }
                     continue;
                 }
 
-                // 2. Handle text query
+                // 2. Handle text query inside the "Mess Menu" group
                 if (text) {
                     const res = await postToPython('/internal/query', {
                         text: text,
@@ -1741,14 +1778,14 @@ async function startWhatsApp() {
                     if (res.reply) {
                         await withTimeout(
                             sock.sendMessage(remoteJid, { text: '\u200B' + res.reply }),
-                            12000,
+                            15000,
                             'sendMessage(query_reply)'
                         );
-                        logToPython('✅ Delivered reply for "' + text + '" to ' + remoteJid);
+                        logToPython('✅ Delivered reply for "' + text + '" to "Mess Menu" group');
                     }
                 }
             } catch (err) {
-                logToPython('❌ Message handler error: ' + (err?.message || String(err)));
+                logToPython('❌ Group message handler error: ' + (err?.message || String(err)));
             }
         }
     });
@@ -1772,7 +1809,7 @@ def start_node_qr_bridge():
 
     while True:
         logger.info("Starting WhatsApp QR-Code Bridge process...")
-        add_bridge_log("🚀 Starting WhatsApp QR bridge process (v2)...")
+        add_bridge_log("🚀 Starting WhatsApp QR bridge process (v3 — 'Mess Menu' Group Only)...")
         proc = subprocess.Popen(["node", "wa_bridge.js"])
         exit_code = proc.wait()
         with STATE_LOCK:
@@ -1818,24 +1855,32 @@ class BotWebServer(BaseHTTPRequestHandler):
             connected = BRIDGE_STATE["connected"]
             qr_url = BRIDGE_STATE["qr_data_url"]
             self_jid = BRIDGE_STATE["self_jid"] or ""
+            group_jid = BRIDGE_STATE["group_jid"] or ""
+            group_name = BRIDGE_STATE["group_name"] or ""
             logs_list = list(BRIDGE_STATE["recent_logs"])
             outbox_count = len(BRIDGE_STATE["outbox"])
 
         logs_html = html.escape("\n".join(logs_list)) if logs_list else "No messages processed yet."
         sent_banner = (
             '<div style="background:#dbeafe;color:#1e40af;padding:12px;border-radius:8px;margin-bottom:16px;">'
-            '📨 <b>Test message queued!</b> Watch the Activity Log below (refresh in 5 seconds) to see delivery confirmation.'
+            '📨 <b>Test message queued for "Mess Menu" group!</b> Watch the Activity Log below (refresh in 5 seconds) to see delivery confirmation.'
             '</div>'
             if "sent=1" in self.path else ""
         )
 
         if connected:
+            group_badge = (
+                f'🎯 <b>Target Group Locked:</b> "{html.escape(group_name)}" (<code>{html.escape(group_jid)}</code>)'
+                if group_jid
+                else '⚠️ <b>Target Group Not Found Yet:</b> Make sure you have a WhatsApp group named exactly <b>Mess Menu</b> and send any message in it!'
+            )
             status_html = f"""
             <div style="background:#dcfce7;color:#166534;padding:16px;border-radius:10px;margin-bottom:20px;">
-                <strong>🟢 Connected to Your Personal WhatsApp! (Bridge v2)</strong> ({html.escape(self_jid)})<br>
-                <small><b>Pending in Outbox: {outbox_count}</b></small><br>
-                Open WhatsApp on your phone, go to your <b>"Message Yourself (You)"</b> chat (or create a solo group and type <code>!menu</code>), and text <code>menu</code>, <code>breakfast</code>, <code>lunch</code>, <code>snacks</code>, or <code>dinner</code>!<br><br>
-                <a href="/send-test" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:600;">📲 Send Test Menu to My WhatsApp Now</a>
+                <strong>🟢 Connected to WhatsApp! (v3 — "Mess Menu" Group Only)</strong> ({html.escape(self_jid)})<br>
+                {group_badge}<br>
+                <small><b>Pending in Outbox: {outbox_count}</b></small><br><br>
+                Open your <b>"Mess Menu"</b> WhatsApp group and text <code>menu</code>, <code>breakfast</code>, <code>lunch</code>, <code>snacks</code>, <code>dinner</code>, or <code>next</code>!<br><br>
+                <a href="/send-test" style="display:inline-block;background:#16a34a;color:#fff;text-decoration:none;padding:10px 16px;border-radius:8px;font-weight:600;">📲 Send Test Menu to "Mess Menu" Group Now</a>
             </div>
             """
         elif qr_url:
@@ -1860,7 +1905,7 @@ class BotWebServer(BaseHTTPRequestHandler):
 <html>
 <head>
     <meta charset="utf-8">
-    <title>BITSoM Mess Menu WhatsApp Bot</title>
+    <title>BITSoM Mess Menu WhatsApp Bot (v3)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {{ font-family: system-ui, -apple-system, sans-serif; max-width: 680px; margin: 30px auto; padding: 0 16px; background: #f8fafc; color: #0f172a; }}
@@ -1871,7 +1916,7 @@ class BotWebServer(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="card">
-        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu WhatsApp Bot (v2)</h2>
+        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu Bot (v3 — "Mess Menu" Group Only)</h2>
         {sent_banner}
         {status_html}
         <p><b>Daily Schedule (IST):</b> Breakfast 06:00 AM • Lunch 11:00 AM • Snacks 03:00 PM • Dinner 07:00 PM • Monday Upload Reminder 09:00 AM</p>
@@ -1907,10 +1952,12 @@ class BotWebServer(BaseHTTPRequestHandler):
                     BRIDGE_STATE["qr_data_url"] = data["qr_data_url"]
                 if "self_jid" in data and data["self_jid"]:
                     BRIDGE_STATE["self_jid"] = data["self_jid"]
-                if "self_lid" in data and data["self_lid"]:
-                    BRIDGE_STATE["self_lid"] = data["self_lid"]
+                if "group_jid" in data and data["group_jid"]:
+                    BRIDGE_STATE["group_jid"] = data["group_jid"]
+                if "group_name" in data and data["group_name"]:
+                    BRIDGE_STATE["group_name"] = data["group_name"]
             if data.get("connected"):
-                add_bridge_log(f"Connected to WhatsApp ({data.get('self_jid')}, LID={data.get('self_lid')})")
+                add_bridge_log(f"Connected to WhatsApp ({data.get('self_jid')})")
             elif "connected" in data and not data.get("connected") and not data.get("qr_data_url"):
                 add_bridge_log("WhatsApp connection closed, reconnecting...")
 
@@ -1928,16 +1975,17 @@ class BotWebServer(BaseHTTPRequestHandler):
             with STATE_LOCK:
                 if BRIDGE_STATE["outbox"]:
                     BRIDGE_STATE["outbox"].pop(0)
-            delivered_to = data.get("delivered_to", "WhatsApp")
+            delivered_to = data.get("delivered_to", "Mess Menu")
             chars = data.get("chars", 0)
             add_bridge_log(f"✅ Delivered outbound message ({chars} chars) -> {delivered_to}")
 
         elif self.path == "/internal/query":
             text = data.get("text", "")
             r_jid = data.get("remote_jid", "")
-            add_bridge_log(f"Received query '{text}' from {r_jid}")
             menu_data = get_active_menu_data()
             reply = resolve_user_query(text, menu_data, datetime.now(TIMEZONE))
+            if reply:
+                add_bridge_log(f"Received query '{text}' in 'Mess Menu' ({r_jid}) -> Replied ({len(reply)} chars)")
             response_payload = {"reply": reply}
 
         elif self.path == "/internal/upload_xlsx":
@@ -1950,12 +1998,12 @@ class BotWebServer(BaseHTTPRequestHandler):
                     f"{d[:3].title()}: {menu_data['dates'].get(d, 'N/A')}"
                     for d in DAYS_ORDER if d in menu_data.get("dates", {})
                 )
-                add_bridge_log(f"Updated weekly Excel menu ({dates_info})")
+                add_bridge_log(f"Updated weekly Excel menu from 'Mess Menu' group ({dates_info})")
                 response_payload = {
                     "reply": (
                         f"✅ *Weekly Menu Updated!*\n"
                         f"📅 Dates loaded: {dates_info or 'Mon–Sun'}\n\n"
-                        f"Daily alerts set for 6:00 AM, 11:00 AM, 3:00 PM, and 7:00 PM IST."
+                        f"Daily alerts set for 6:00 AM, 11:00 AM, 3:00 PM, and 7:00 PM IST in *Mess Menu*."
                     )
                 }
             except Exception as exc:
@@ -1974,7 +2022,7 @@ class BotWebServer(BaseHTTPRequestHandler):
 # CLI Entrypoint
 # ---------------------------------------------------------------------------
 def main():
-    parser = argparse.ArgumentParser(description="BITSoM Personal WhatsApp Mess Menu Bot")
+    parser = argparse.ArgumentParser(description="BITSoM Mess Menu WhatsApp Bot (Mess Menu Group Only)")
     parser.add_argument("--file", help="Optional path to a .xlsx menu file to load")
     parser.add_argument("--preview", choices=DAYS_ORDER + ["ALL"], help="Preview formatted WhatsApp messages")
     parser.add_argument("--query", help="Test an on-demand query (e.g. 'today', 'thursday dinner')")
