@@ -1,23 +1,23 @@
 """
-WhatsApp Mess Menu Bot — Strictly for Your "Mess Menu" WhatsApp Group (v3)
+WhatsApp Mess Menu Bot — Strictly for Your "Mess Menu" WhatsApp Group (v4)
 ==========================================================================
 Built for BITSoM - Kamba Weekly Mess Menu:
-• Pre-loaded with this week's menu (19/10/26 to 25/10/26) so it works immediately!
-• Connects to your WhatsApp via QR Code ("Linked Devices") — 100% Free.
+• Pre-loaded with this week's menu (16/11/26 to 22/11/26) so it works immediately!
+• Dynamic Section & Row Detector:
+    - Scans the entire Excel workbook across all sheets and automatically selects
+      the latest week's worksheet.
+    - Dynamically locates Breakfast, Lunch, Snacks, Dinner, Food Trotters,
+      Bowled Over, and Perfect Jodi regardless of which row numbers they are on
+      or minor spelling/header variations (e.g. "Food Trottrers", "Perfect Jodi (Dinner)").
+    - ALWAYS attaches Food Trotters & Bowled Over to LUNCH, and Perfect Jodi to DINNER.
 • STRICTLY & EXCLUSIVELY operates inside the WhatsApp group named "Mess Menu"
   (never messages your personal "You" chat or any other chat/group).
 • Automatically posts to the "Mess Menu" group in IST:
     - 06:00 AM : Breakfast
     - 11:00 AM : Lunch (including Bowled Over & Food Trotters)
     - 03:00 PM : Evening Snacks (including Jain Snack & Hot Beverage)
-    - 07:00 PM : Dinner (including Perfect Jodi / Bowled Over)
+    - 07:00 PM : Dinner (including Perfect Jodi)
     - 09:00 AM (Mondays) : Reminder to drop the new week's Excel (.xlsx) file
-• On Mondays, just drop the new `.xlsx` file into the "Mess Menu" group to update!
-• Anyone in the "Mess Menu" group can text anytime:
-    - "menu" or "today" -> Full day's menu (all 4 meals)
-    - "breakfast", "lunch", "snacks", or "dinner" -> Specific meal for today
-    - "next" -> Next upcoming meal
-    - "tomorrow" or any weekday (e.g. "thursday", "friday lunch", "sunday dinner")
 """
 
 import argparse
@@ -83,32 +83,22 @@ MEAL_ALIASES = {
     "dinner": "dinner", "night": "dinner",
 }
 
-SECTION_HEADERS = {
-    "breakfast": "breakfast",
-    "lunch": "lunch",
-    "bowled over": "lunch_bowled_over",
-    "food trotters": "lunch_food_trotters",
-    "snacks": "snacks",
-    "dinner": "dinner",
-    "perfect jodi / bowled over": "dinner_perfect_jodi",
-}
-
-# Pre-loaded menu from your attached BITSoM - Kamba (19/10/26 to 25/10/26) Excel file
+# Pre-loaded menu from your attached BITSoM - Kamba (16/11/26 to 22/11/26) Excel file
 DEFAULT_MENU_DATA = json.loads(r"""{
   "dates": {
-    "MONDAY": "19/10/26",
-    "TUESDAY": "20/10/26",
-    "WEDNESDAY": "21/10/26",
-    "THURSDAY": "22/10/26",
-    "FRIDAY": "23/10/26",
-    "SATURDAY": "24/10/26",
-    "SUNDAY": "25/10/26"
+    "MONDAY": "16/11/26",
+    "TUESDAY": "17/11/26",
+    "WEDNESDAY": "18/11/26",
+    "THURSDAY": "19/11/26",
+    "FRIDAY": "20/11/26",
+    "SATURDAY": "21/11/26",
+    "SUNDAY": "22/11/26"
   },
   "day_labels": {
     "MONDAY": "MONDAY",
     "TUESDAY": "TUESDAY",
     "WEDNESDAY": "WEDNESDAY",
-    "THURSDAY": "THURSDAY(gujrati day)",
+    "THURSDAY": "THURSDAY",
     "FRIDAY": "FRIDAY",
     "SATURDAY": "SATURDAY",
     "SUNDAY": "SUNDAY"
@@ -118,263 +108,7 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "breakfast": [
         [
           "Vegetarian Mains",
-          "Steamed Idli with Sambhar"
-        ],
-        [
-          "Fruits",
-          "Cut Fruits"
-        ],
-        [
-          "Cereals",
-          "Wheat Flakes with Milk"
-        ],
-        [
-          "Egg Preparation (2 Nos Max)",
-          "Masala omelette"
-        ],
-        [
-          "Hot Beverage",
-          "Tea And Coffee"
-        ]
-      ],
-      "lunch": [
-        [
-          "Salad",
-          "Dill Cucumber salad"
-        ],
-        [
-          "Dry Veg",
-          "Tawa veg"
-        ],
-        [
-          "Semi Dry Veg",
-          "Amritsari Chole"
-        ],
-        [
-          "Dal & Kadhi",
-          "punjabi kadhi"
-        ],
-        [
-          "Rice",
-          "Steamed Rice"
-        ],
-        [
-          "Non-Veg",
-          "Chicken Lababdar"
-        ],
-        [
-          "Indian Breads",
-          "Phulka"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/curd"
-        ],
-        [
-          "Dessert",
-          "rice coconut kheer"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 1"
-        ]
-      ],
-      "food_trotters": [
-        "veg penne primavera",
-        "Garlic buns",
-        "Chicken Penne Primavera"
-      ],
-      "snacks": [
-        [
-          "Evening Snacks",
-          "Ragda Pattice"
-        ],
-        [
-          "Jain Snack",
-          "Ragda Pattice"
-        ],
-        [
-          "Hot Beverage",
-          "Hot Beverage"
-        ]
-      ],
-      "dinner": [
-        [
-          "Salad",
-          "Greek Salad"
-        ],
-        [
-          "Semi - Dry",
-          "Paneer Mutter Masala"
-        ],
-        [
-          "Dry Prep",
-          "Aloo jeera"
-        ],
-        [
-          "Rice",
-          "Steamed Rice"
-        ],
-        [
-          "Dal (Lentils)",
-          "Dal Tadka"
-        ],
-        [
-          "Non Veg",
-          "Egg Punjabi Curry"
-        ],
-        [
-          "Indian Breads",
-          "Phulka"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/mocktail"
-        ],
-        [
-          "Dessert",
-          "Chocolate brownie"
-        ]
-      ],
-      "perfect_jodi": [
-        "veg tawa pulao",
-        "cucumber raita",
-        "chicken tawa pulao"
-      ]
-    },
-    "TUESDAY": {
-      "breakfast": [
-        [
-          "Vegetarian Mains",
-          "black chana sukha masal with puri and suji halwa"
-        ],
-        [
-          "Fruits",
-          "Cut Muskmelon + Watermelon"
-        ],
-        [
-          "Cereals",
-          "Muesili with milk"
-        ],
-        [
-          "Egg Preparation (2 Nos Max)",
-          "Pancake with maple syrup"
-        ],
-        [
-          "Hot Beverage",
-          "Tea And Coffee"
-        ]
-      ],
-      "lunch": [
-        [
-          "Salad",
-          "American corn salad with dressing"
-        ],
-        [
-          "Dry Veg",
-          "tandoori gobhi"
-        ],
-        [
-          "Semi Dry Veg",
-          "Veg kofta curry"
-        ],
-        [
-          "Dal & Kadhi",
-          "herb Rice"
-        ],
-        [
-          "Rice",
-          "Dal Rajasthani"
-        ],
-        [
-          "Non-Veg",
-          "Andhra Anda Masala"
-        ],
-        [
-          "Indian Breads",
-          "Chapati"
-        ],
-        [
-          "Ancillaries",
-          "Fry Papad/Pickle/Butter Milk"
-        ],
-        [
-          "Dessert",
-          "Orange slice cake"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 2"
-        ]
-      ],
-      "food_trotters": [
-        "Manchurian chilli in garlic sauce",
-        "Combination rice",
-        "Chicken In Chilli Garlic Gravy"
-      ],
-      "snacks": [
-        [
-          "Evening Snacks",
-          "Frankie"
-        ],
-        [
-          "Jain Snack",
-          "Frankie"
-        ],
-        [
-          "Hot Beverage",
-          "Hot Beverage"
-        ]
-      ],
-      "dinner": [
-        [
-          "Salad",
-          "Sprout salad"
-        ],
-        [
-          "Semi - Dry",
-          "Paneer Lazeez"
-        ],
-        [
-          "Dry Prep",
-          "Bhindi Do Payaza"
-        ],
-        [
-          "Rice",
-          "Jeera Rice"
-        ],
-        [
-          "Dal (Lentils)",
-          "Yellow Moong Dal"
-        ],
-        [
-          "Non Veg",
-          "Butter chicken"
-        ],
-        [
-          "Indian Breads",
-          "Chapatti"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/Curd"
-        ],
-        [
-          "Dessert",
-          "Kesar sevyian kheer"
-        ]
-      ],
-      "perfect_jodi": [
-        "veg quesadilla",
-        "Ranch",
-        "Chicken Quesadilla"
-      ]
-    },
-    "WEDNESDAY": {
-      "breakfast": [
-        [
-          "Vegetarian Mains",
-          "Dal pakwan"
+          "Sabudana vada with Plain Curd"
         ],
         [
           "Fruits",
@@ -382,7 +116,7 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Cereals",
-          "Oats With Milk"
+          "Muesli with milk"
         ],
         [
           "Egg Preparation (2 Nos Max)",
@@ -396,23 +130,27 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "lunch": [
         [
           "Salad",
-          "Boondi Raita"
+          "Parsely lemony Cucumber"
         ],
         [
           "Dry Veg",
-          "Aloo Mutter Rassilla"
+          "Sukha Kala Channa"
+        ],
+        [
+          "Semi Dry Veg",
+          "Veg Tawa"
         ],
         [
           "Dal & Kadhi",
-          "Paneer and soya Biryani"
+          "Dal Makhani"
         ],
         [
           "Rice",
-          "Mirch ka Salan"
+          "Ghee Rice"
         ],
         [
           "Non-Veg",
-          "Dum Chicken Biryani"
+          "Butter Chicken"
         ],
         [
           "Indian Breads",
@@ -420,30 +158,27 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Ancillaries",
-          "Papad/Pickle/virgin mojito"
+          "Papad/Pickle/Curd"
         ],
         [
           "Dessert",
-          "Shahi tukda"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 3"
+          "pineapple pastry"
         ]
       ],
+      "bowled_over": [],
       "food_trotters": [
-        "veg hakka noodles",
-        "burnt galic vegetable sauce",
-        "chicken hakka noodles"
+        "Veg: Veg burmese curry",
+        "Kaffir lime rice",
+        "Non-Veg: Chicken burmese curry"
       ],
       "snacks": [
         [
           "Evening Snacks",
-          "Mumbai Bhel"
+          "ragda pattice"
         ],
         [
-          "Jain Snack",
-          "Mumbai Bhel"
+          "Jain Evening Snacks",
+          "ragda pattice"
         ],
         [
           "Hot Beverage",
@@ -453,27 +188,27 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "dinner": [
         [
           "Salad",
-          "Spring salad"
-        ],
-        [
-          "Semi - Dry",
-          "mix veg poriyal"
+          "Chimichurri Salad"
         ],
         [
           "Dry Prep",
-          "Makhane ki sabji"
+          "adraki gobhi"
+        ],
+        [
+          "Semi Dry Prep",
+          "Paneer handi"
         ],
         [
           "Rice",
-          "Lemon rice"
+          "coriander rice"
         ],
         [
           "Dal (Lentils)",
-          "Dal Triveni"
+          "Dal Tadka"
         ],
         [
           "Non Veg",
-          "Chicken Korma"
+          "Andhra style egg curry"
         ],
         [
           "Indian Breads",
@@ -481,36 +216,36 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Ancillaries",
-          "Papad/Pickle/Lemon Ice Tea"
+          "Papad/Pickle/lemonade"
         ],
         [
           "Dessert",
-          "Tiramisu pastry"
+          "mango phirni"
         ]
       ],
       "perfect_jodi": [
-        "methi corn rice",
-        "cheese sauce (white sauce pasta sauce)",
-        "Chicken rice"
+        "Veg: paneer tikka masala",
+        "Malabar paratha",
+        "Non Veg: Chicken tikka masala"
       ]
     },
-    "THURSDAY": {
+    "TUESDAY": {
       "breakfast": [
         [
           "Vegetarian Mains",
-          "Fafda jalebi with kadhi and fried chilli"
+          "Uttapam with sambar and coconut chutney"
         ],
         [
           "Fruits",
-          "Orange + Watermelon"
+          "Watermelon + orange"
         ],
         [
           "Cereals",
-          "Corn Flakes with Milk"
+          "Oats With Milk"
         ],
         [
           "Egg Preparation (2 Nos Max)",
-          "Bellpepper omelette"
+          "Pancake With Maple Syrup"
         ],
         [
           "Hot Beverage",
@@ -520,31 +255,31 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "lunch": [
         [
           "Salad",
-          "Kachumbar salad"
+          "Kala Chana Chaat"
         ],
         [
           "Dry Veg",
-          "sev tamatar"
+          "Soya Capsicum Dry"
         ],
         [
           "Semi Dry Veg",
-          "Undhiyu"
+          "Lassoni Palak babycorn Paneer"
         ],
         [
           "Dal & Kadhi",
-          "Gujrati dal"
+          "Dal Methi"
         ],
         [
           "Rice",
-          "Ghee rice"
+          "Jeera Rice"
         ],
         [
           "Non-Veg",
-          "Chicken sukka"
+          "Egg Changezi"
         ],
         [
           "Indian Breads",
-          "Methi roti"
+          "Chapati"
         ],
         [
           "Ancillaries",
@@ -552,22 +287,23 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dessert",
-          "Mango shreekhand"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 4"
+          "Ice Cream"
         ]
       ],
-      "food_trotters": [],
+      "bowled_over": [],
+      "food_trotters": [
+        "Veg: Veg Creamy Peri Peri Pasta",
+        "Garlic bread",
+        "Non-Veg: Chicken Creamy Peri Peri Pasta"
+      ],
       "snacks": [
         [
           "Evening Snacks",
-          "locho with sev and a drizzle of oil"
+          "Khaman dokla"
         ],
         [
-          "Jain Snack",
-          "locho with sev and a drizzle of oil"
+          "Jain Evening Snacks",
+          "Khaman dokla"
         ],
         [
           "Hot Beverage",
@@ -577,15 +313,15 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "dinner": [
         [
           "Salad",
-          "Cabbage lettuce Coleslaw"
-        ],
-        [
-          "Semi - Dry",
-          "Paneer Handi"
+          "Tandoori laccha Salad"
         ],
         [
           "Dry Prep",
-          "ringan batata nu shaak"
+          "Aloo Methi"
+        ],
+        [
+          "Semi Dry Prep",
+          "Nawabi Veg Handi"
         ],
         [
           "Rice",
@@ -593,15 +329,15 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dal (Lentils)",
-          "moong dal"
+          "Masoor Dal"
         ],
         [
           "Non Veg",
-          "Dhaba Style Egg Curry"
+          "Chicken ghee roast"
         ],
         [
           "Indian Breads",
-          "thepla"
+          "Chapati"
         ],
         [
           "Ancillaries",
@@ -609,20 +345,141 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dessert",
-          "Chocolate mohanthal"
+          "orange slice cake"
         ]
       ],
       "perfect_jodi": [
-        "messi roti",
-        "punjabi kadhi pakoda",
-        "chicken pakoda"
+        "Veg: Rajma Chawal",
+        "tamarind chutney",
+        "Non Veg: Punjabi Chicken Curry Chawal"
       ]
     },
-    "FRIDAY": {
+    "WEDNESDAY": {
       "breakfast": [
         [
           "Vegetarian Mains",
-          "rava upma with green chutney"
+          "Potato cheese grilled sandwich"
+        ],
+        [
+          "Fruits",
+          "Muskmelon+ Watermelon"
+        ],
+        [
+          "Cereals",
+          "Wheat flakes With Milk"
+        ],
+        [
+          "Egg Preparation (2 Nos Max)",
+          "Anda Masala Bhurji Brown bread"
+        ],
+        [
+          "Hot Beverage",
+          "Tea And Coffee"
+        ]
+      ],
+      "lunch": [
+        [
+          "Salad",
+          "Boondi Raita"
+        ],
+        [
+          "Dry Veg",
+          "Aloo Mutter"
+        ],
+        [
+          "Semi Dry Veg",
+          "Mirch Ka salan"
+        ],
+        [
+          "Rice",
+          "Hyderabadi Dum Biryani"
+        ],
+        [
+          "Non-Veg",
+          "Hyderabadi Chicken Dum Biryani"
+        ],
+        [
+          "Indian Breads",
+          "Chapati"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Kokum Sharbat"
+        ],
+        [
+          "Dessert",
+          "Shahi Tukda"
+        ]
+      ],
+      "bowled_over": [],
+      "food_trotters": [
+        "Veg: veg burrito wrap",
+        "sour ranch",
+        "Non-Veg: chicken burrito wrap"
+      ],
+      "snacks": [
+        [
+          "Evening Snacks",
+          "Misal Pav"
+        ],
+        [
+          "Jain Evening Snacks",
+          "Misal Pav"
+        ],
+        [
+          "Hot Beverage",
+          "Hot Beverage"
+        ]
+      ],
+      "dinner": [
+        [
+          "Salad",
+          "Greek Salad"
+        ],
+        [
+          "Dry Prep",
+          "Gutti vankaya kura"
+        ],
+        [
+          "Semi Dry Prep",
+          "paneer kuchan"
+        ],
+        [
+          "Rice",
+          "Steam Rice"
+        ],
+        [
+          "Dal (Lentils)",
+          "rasam"
+        ],
+        [
+          "Non Veg",
+          "Homestyle egg curry"
+        ],
+        [
+          "Indian Breads",
+          "Phulka"
+        ],
+        [
+          "Ancillaries",
+          "pappadam/Pickle/Pudina Chaas"
+        ],
+        [
+          "Dessert",
+          "seviya dry fruit kheer"
+        ]
+      ],
+      "perfect_jodi": [
+        "Veg: lassoni saag",
+        "missi roti",
+        "Non Veg: chicken lababdar"
+      ]
+    },
+    "THURSDAY": {
+      "breakfast": [
+        [
+          "Vegetarian Mains",
+          "Assorted paratha with Dahi"
         ],
         [
           "Fruits",
@@ -630,11 +487,377 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Cereals",
-          "Wheat Flakes with Milk"
+          "Oats With Milk"
         ],
         [
           "Egg Preparation (2 Nos Max)",
-          "egg bytes but put masala"
+          "Egg Shakshuka"
+        ],
+        [
+          "Hot Beverage",
+          "Tea And Coffee"
+        ]
+      ],
+      "lunch": [
+        [
+          "Salad",
+          "Tossed Salad"
+        ],
+        [
+          "Dry Veg",
+          "Cabbage Mutter"
+        ],
+        [
+          "Semi Dry Veg",
+          "Paneer Lababdar"
+        ],
+        [
+          "Dal & Kadhi",
+          "Dal Fry"
+        ],
+        [
+          "Rice",
+          "Jeera Rice"
+        ],
+        [
+          "Non-Veg",
+          "Anda Tawa Masala"
+        ],
+        [
+          "Indian Breads",
+          "Chapati"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Curd"
+        ],
+        [
+          "Dessert",
+          "Gajar Halwa"
+        ]
+      ],
+      "bowled_over": [],
+      "food_trotters": [
+        "Veg: Exotic vegetable in spicy chilli basil sauce",
+        "Fried rice",
+        "Non-Veg: Chicken in spicy chilli basil sauce"
+      ],
+      "snacks": [
+        [
+          "Evening Snacks",
+          "Cheese chilli toast"
+        ],
+        [
+          "Jain Evening Snacks",
+          "Cheese chilli toast"
+        ],
+        [
+          "Hot Beverage",
+          "Hot Beverage"
+        ]
+      ],
+      "dinner": [
+        [
+          "Salad",
+          "Cucumber Raita"
+        ],
+        [
+          "Semi Dry Prep",
+          "rajma raseela"
+        ],
+        [
+          "Rice",
+          "Tawa Pulao"
+        ],
+        [
+          "Non Veg",
+          "Chicken Tawa Pulao"
+        ],
+        [
+          "Indian Breads",
+          "Phulka"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Mix fruit Punch"
+        ],
+        [
+          "Dessert",
+          "Dutch Truffle Pastry"
+        ]
+      ],
+      "perfect_jodi": [
+        "Veg: Malai Kofta (White gravy sweet)",
+        "Malabar Paratha",
+        "Non Veg: Chicken Malai"
+      ]
+    },
+    "FRIDAY": {
+      "breakfast": [
+        [
+          "Vegetarian Mains",
+          "Mysore bonda with sambar and peanut chutney"
+        ],
+        [
+          "Fruits",
+          "Pineapple+ Watermelon"
+        ],
+        [
+          "Cereals",
+          "Wheat flakes With Milk"
+        ],
+        [
+          "Egg Preparation (2 Nos Max)",
+          "Spicy egg bites with green chutney"
+        ],
+        [
+          "Hot Beverage",
+          "Tea And Coffee"
+        ]
+      ],
+      "lunch": [
+        [
+          "Salad",
+          "Pasta Salad"
+        ],
+        [
+          "Dry Veg",
+          "Bhindi do pyaza"
+        ],
+        [
+          "Semi Dry Veg",
+          "Kofta Curry"
+        ],
+        [
+          "Dal & Kadhi",
+          "Dal Triveni"
+        ],
+        [
+          "Rice",
+          "Coriander rice"
+        ],
+        [
+          "Non-Veg",
+          "Chicken Korma"
+        ],
+        [
+          "Indian Breads",
+          "Phulka"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Curd"
+        ],
+        [
+          "Dessert",
+          "rasgulla"
+        ]
+      ],
+      "bowled_over": [],
+      "food_trotters": [
+        "Veg: Veg Momos",
+        "hakka Noodles",
+        "Non-Veg: Chicken Momos"
+      ],
+      "snacks": [
+        [
+          "Evening Snacks",
+          "pani puri with aloo"
+        ],
+        [
+          "Jain Evening Snacks",
+          "pani puri with aloo"
+        ],
+        [
+          "Hot Beverage",
+          "Hot Beverage"
+        ]
+      ],
+      "dinner": [
+        [
+          "Salad",
+          "Spring Salad"
+        ],
+        [
+          "Dry Prep",
+          "Soya Corn Gravy"
+        ],
+        [
+          "Semi Dry Prep",
+          "Mutter Paneer"
+        ],
+        [
+          "Rice",
+          "Jeera Dhaniya Rice"
+        ],
+        [
+          "Dal (Lentils)",
+          "palak dal"
+        ],
+        [
+          "Non Veg",
+          "Egg Handi"
+        ],
+        [
+          "Indian Breads",
+          "Chapati"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/chaas"
+        ],
+        [
+          "Dessert",
+          "kulfi"
+        ]
+      ],
+      "perfect_jodi": [
+        "Veg: paneer ghasi",
+        "set dosa",
+        "Non Veg: chicken ghasi"
+      ]
+    },
+    "SATURDAY": {
+      "breakfast": [
+        [
+          "Vegetarian Mains",
+          "Veg Pancakes with chocolate syrup"
+        ],
+        [
+          "Fruits",
+          "Watermelon"
+        ],
+        [
+          "Cereals",
+          "Muesili with Milk"
+        ],
+        [
+          "Egg Preparation (2 Nos Max)",
+          "Boiled eggs"
+        ],
+        [
+          "Hot Beverage",
+          "Tea And Coffee"
+        ]
+      ],
+      "lunch": [
+        [
+          "Salad",
+          "Aamerican corn salad"
+        ],
+        [
+          "Dry Veg",
+          "Gobi Mutter Sukka"
+        ],
+        [
+          "Semi Dry Veg",
+          "Dum ka paneer"
+        ],
+        [
+          "Dal & Kadhi",
+          "masoor dal"
+        ],
+        [
+          "Rice",
+          "herb rice"
+        ],
+        [
+          "Non-Veg",
+          "Egg hyderabadi masala"
+        ],
+        [
+          "Indian Breads",
+          "Chapati"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Curd"
+        ],
+        [
+          "Dessert",
+          "Moong Dal halwa"
+        ]
+      ],
+      "bowled_over": [],
+      "food_trotters": [
+        "Veg: Veg Khowsuey",
+        "Non-Veg: Chickn khowsuey"
+      ],
+      "snacks": [
+        [
+          "Evening Snacks",
+          "Honey chilli potato"
+        ],
+        [
+          "Jain Evening Snacks",
+          "Honey chilli potato"
+        ],
+        [
+          "Hot Beverage",
+          "Hot Beverage"
+        ]
+      ],
+      "dinner": [
+        [
+          "Salad",
+          "Chimichuri Salad"
+        ],
+        [
+          "Dry Prep",
+          "Tendli kala chana poriyal"
+        ],
+        [
+          "Semi Dry Prep",
+          "Veg Handi"
+        ],
+        [
+          "Rice",
+          "Steam Rice"
+        ],
+        [
+          "Dal (Lentils)",
+          "Sambhar"
+        ],
+        [
+          "Non Veg",
+          "Dhaniya Chicken"
+        ],
+        [
+          "Indian Breads",
+          "Pulka"
+        ],
+        [
+          "Ancillaries",
+          "Papad/Pickle/Orange Masala"
+        ],
+        [
+          "Dessert",
+          "strawberry delight"
+        ]
+      ],
+      "perfect_jodi": [
+        "Veg: Veg Biryani",
+        "Boondi Raita / papad",
+        "Non Veg: Chicken Biryani"
+      ]
+    },
+    "SUNDAY": {
+      "breakfast": [
+        [
+          "Vegetarian Mains",
+          "Dal Pakwan"
+        ],
+        [
+          "Fruits",
+          "pineapple + melon"
+        ],
+        [
+          "Cereals",
+          "Oats with milk"
+        ],
+        [
+          "Egg Preparation (2 Nos Max)",
+          "Pepper Cheese Omelette"
         ],
         [
           "Hot Beverage",
@@ -648,84 +871,23 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dry Veg",
-          "paneer ghassi"
+          "maharashtrian Batata bhaji"
         ],
         [
           "Semi Dry Veg",
-          "kootu curry"
+          "Saoji Style Mix Veg"
         ],
         [
           "Dal & Kadhi",
-          "Sambhar"
+          "Dahi Kadi"
         ],
         [
           "Rice",
-          "Tamarind rice"
+          "Steam Rice"
         ],
         [
           "Non-Veg",
-          "Egg Kadai"
-        ],
-        [
-          "Indian Breads",
-          "Chapati"
-        ],
-        [
-          "Ancillaries",
-          "Papad / Pickle /Curd"
-        ],
-        [
-          "Dessert",
-          "red velvet pastry"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 5"
-        ]
-      ],
-      "food_trotters": [
-        "Mexican Burrito Wrap",
-        "sour ranch",
-        "Mexican chicken burrito"
-      ],
-      "snacks": [
-        [
-          "Evening Snacks",
-          "Pulugulu wth Peanut Chutney"
-        ],
-        [
-          "Jain Snack",
-          "Pulugulu wth Peanut Chutney"
-        ],
-        [
-          "Hot Beverage",
-          "Hot Beverage"
-        ]
-      ],
-      "dinner": [
-        [
-          "Salad",
-          "Green Salad"
-        ],
-        [
-          "Semi - Dry",
-          "Veg Hangama"
-        ],
-        [
-          "Dry Prep",
-          "Hara pyaaz aloo"
-        ],
-        [
-          "Rice",
-          "Jeera rice"
-        ],
-        [
-          "Dal (Lentils)",
-          "Dal Maharani"
-        ],
-        [
-          "Non Veg",
-          "Batti Da Murg"
+          "Gavran Chicken Rassa"
         ],
         [
           "Indian Breads",
@@ -737,93 +899,23 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dessert",
-          "Fruit Custard"
+          "gulab jamun"
         ]
       ],
-      "perfect_jodi": [
-        "Pav bhaji",
-        "Pav",
-        "chicken keema"
-      ]
-    },
-    "SATURDAY": {
-      "breakfast": [
-        [
-          "Vegetarian Mains",
-          "French toast maple syrup"
-        ],
-        [
-          "Fruits",
-          "Cut Muskmelon + Watermelon"
-        ],
-        [
-          "Cereals",
-          "Corn Flakes with Milk"
-        ],
-        [
-          "Egg Preparation (2 Nos Max)",
-          "French toast with egg"
-        ],
-        [
-          "Hot Beverage",
-          "Tea And Coffee"
-        ]
-      ],
-      "lunch": [
-        [
-          "Salad",
-          "Koshimbir"
-        ],
-        [
-          "Dry Veg",
-          "achari bhindi"
-        ],
-        [
-          "Semi Dry Veg",
-          "Rajasthani Sigdi ka paneer"
-        ],
-        [
-          "Dal & Kadhi",
-          "Rajma raseela"
-        ],
-        [
-          "Rice",
-          "Peas pulav"
-        ],
-        [
-          "Non-Veg",
-          "Chicken do Payaza"
-        ],
-        [
-          "Indian Breads",
-          "Palak Phulka"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/ Kala Khatta"
-        ],
-        [
-          "Dessert",
-          "Black forest pastry"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 6"
-        ]
-      ],
+      "bowled_over": [],
       "food_trotters": [
-        "vegetable in burnt garlic sauce",
-        "Malaysian Rice",
-        "Chicken In Burnt Garlic Sauce Sauce"
+        "Veg: Beetroot Hummus With Pita Bread",
+        "Sweet Corn Soup",
+        "Non-Veg: Chicken Beetroot Hummus With Pita Bread"
       ],
       "snacks": [
         [
           "Evening Snacks",
-          "Hara bhara Kabab"
+          "Bread pakoda"
         ],
         [
-          "Jain Snack",
-          "Hara bhara Kabab"
+          "Jain Evening Snacks",
+          "Bread pakoda"
         ],
         [
           "Hot Beverage",
@@ -833,142 +925,15 @@ DEFAULT_MENU_DATA = json.loads(r"""{
       "dinner": [
         [
           "Salad",
-          "Chimichurri Salad"
-        ],
-        [
-          "Semi - Dry",
-          "Pindi chole"
+          "Classic Green Salad"
         ],
         [
           "Dry Prep",
-          "Khada Bhaji"
+          "Hara Moong Methi"
         ],
         [
-          "Rice",
-          "Dum Rice"
-        ],
-        [
-          "Dal (Lentils)",
-          "Surti Dal"
-        ],
-        [
-          "Non Veg",
-          "Homestyle egg curry"
-        ],
-        [
-          "Indian Breads",
-          "Chapatti"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/Curd"
-        ],
-        [
-          "Dessert",
-          "Rasgulla"
-        ]
-      ],
-      "perfect_jodi": [
-        "Dal makhani",
-        "paneer masal kulcha",
-        "chicken masala"
-      ]
-    },
-    "SUNDAY": {
-      "breakfast": [
-        [
-          "Vegetarian Mains",
-          "Luchi gugni"
-        ],
-        [
-          "Fruits",
-          "Banana"
-        ],
-        [
-          "Cereals",
-          "Muesili with milk"
-        ],
-        [
-          "Egg Preparation (2 Nos Max)",
-          "Anda Bhurji With Brown bread"
-        ],
-        [
-          "Hot Beverage",
-          "Tea And Coffee"
-        ]
-      ],
-      "lunch": [
-        [
-          "Salad",
-          "Lemony Carrot Beetroot Salad"
-        ],
-        [
-          "Dry Veg",
-          "Soya corn masala"
-        ],
-        [
-          "Semi Dry Veg",
-          "Veg jalfrezi"
-        ],
-        [
-          "Dal & Kadhi",
-          "Maa ki dal"
-        ],
-        [
-          "Rice",
-          "Kari patta pulav"
-        ],
-        [
-          "Non-Veg",
-          "Egg kosha"
-        ],
-        [
-          "Indian Breads",
-          "Ajwain Phulka"
-        ],
-        [
-          "Ancillaries",
-          "Papad/Pickle/Curd"
-        ],
-        [
-          "Dessert",
-          "Rose Phirni"
-        ],
-        [
-          "Bowled Over Lunch",
-          "Bowled Over 7"
-        ]
-      ],
-      "food_trotters": [
-        "Mini Burgers",
-        "Chicken mini burgers"
-      ],
-      "snacks": [
-        [
-          "Evening Snacks",
-          "Gobhi manchurian"
-        ],
-        [
-          "Jain Snack",
-          "Gobhi manchurian"
-        ],
-        [
-          "Hot Beverage",
-          "Hot Beverage"
-        ]
-      ],
-      "dinner": [
-        [
-          "Salad",
-          "caesar salad with dressing"
-        ],
-        [
-          "Semi - Dry",
-          "Veg korma"
-        ],
-        [
-          "Dry Prep",
-          "Lassoni aloo methi dry"
+          "Semi Dry Prep",
+          "Paneer Do Pyaza"
         ],
         [
           "Rice",
@@ -976,29 +941,29 @@ DEFAULT_MENU_DATA = json.loads(r"""{
         ],
         [
           "Dal (Lentils)",
-          "Pepper rasam"
+          "Dal Achari"
         ],
         [
           "Non Veg",
-          "Dum ka chicken"
+          "mughlai chicken"
         ],
         [
           "Indian Breads",
-          "Pulka"
+          "Chapati"
         ],
         [
           "Ancillaries",
-          "Papad/Pickle/Chaas"
+          "Papad/Pickle/curd"
         ],
         [
           "Dessert",
-          "Pineapple Pastry"
+          "butterscotch pastry"
         ]
       ],
       "perfect_jodi": [
-        "malai panner kofta",
-        "malabar paratha",
-        "malai chicken"
+        "Veg: amritsari chole",
+        "kulcha",
+        "Non Veg: chicken masala"
       ]
     }
   }
@@ -1026,7 +991,7 @@ def add_bridge_log(entry: str):
 
 
 # ---------------------------------------------------------------------------
-# Excel Menu Parser (BITSoM - Kamba Layout)
+# Dynamic Excel Menu Parser (Row-Order Independent & Multi-Sheet Aware)
 # ---------------------------------------------------------------------------
 def normalize_day_name(raw_cell: str) -> str:
     if not raw_cell:
@@ -1035,7 +1000,35 @@ def normalize_day_name(raw_cell: str) -> str:
     for day in DAYS_ORDER:
         if upper.startswith(day):
             return day
-    return upper
+    return ""
+
+
+def classify_section_header(label_str: str) -> str | None:
+    """
+    Dynamically identifies which meal/counter a section header belongs to,
+    regardless of where it is placed in the sheet or minor typos:
+    - Food Trotters ("Food Trotters", "Food Trottrers") -> always Lunch
+    - Perfect Jodi ("Perfect Jodi", "Perfect Jodi ( Dinner)", "Perfect Jodi / Bowled Over") -> always Dinner
+    - Bowled Over ("Bowled Over", "Bowled Over Lunch") -> always Lunch
+    """
+    if not label_str:
+        return None
+    s = " ".join(str(label_str).strip().lower().split())
+    if "trot" in s or "totter" in s:
+        return "lunch_food_trotters"
+    if "jodi" in s:
+        return "dinner_perfect_jodi"
+    if "bowled" in s:
+        return "lunch_bowled_over"
+    if "breakfast" in s or "bfast" in s:
+        return "breakfast"
+    if "lunch" in s:
+        return "lunch"
+    if "snack" in s or "hi-tea" in s or "high tea" in s:
+        return "snacks"
+    if "dinner" in s or "supper" in s:
+        return "dinner"
+    return None
 
 
 def is_non_veg_entry(category: str, item_text: str) -> bool:
@@ -1048,15 +1041,26 @@ def is_non_veg_entry(category: str, item_text: str) -> bool:
     return any(k in cat_lower or k in item_lower for k in keywords)
 
 
-def parse_date_string(date_str: str) -> date | None:
-    if not date_str:
-        return None
-    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d-%m-%Y"):
+def parse_date_cell(val) -> tuple[date | None, str]:
+    if val is None:
+        return None, ""
+    if isinstance(val, datetime):
+        return val.date(), val.strftime("%d/%m/%y")
+    if isinstance(val, date):
+        return val, val.strftime("%d/%m/%y")
+    s = str(val).strip()
+    for fmt in ("%d/%m/%y", "%d/%m/%Y", "%Y-%m-%d", "%d-%m-%y", "%d-%m-%Y", "%Y/%m/%d"):
         try:
-            return datetime.strptime(date_str.strip(), fmt).date()
+            d = datetime.strptime(s.split()[0], fmt).date()
+            return d, d.strftime("%d/%m/%y")
         except ValueError:
             continue
-    return None
+    return None, s
+
+
+def parse_date_string(date_str: str) -> date | None:
+    d_obj, _ = parse_date_cell(date_str)
+    return d_obj
 
 
 def is_menu_outdated(menu_data: dict, today_date: date) -> bool:
@@ -1069,45 +1073,51 @@ def is_menu_outdated(menu_data: dict, today_date: date) -> bool:
     return max(parsed_dates) < today_date
 
 
-def parse_menu_excel(file_path: str) -> dict:
-    """Parses the BITSoM - Kamba weekly Excel file (.xlsx) into a structured dict."""
-    wb = openpyxl.load_workbook(file_path, data_only=True)
-    sheet = wb.active
-
+def _parse_single_worksheet(sheet) -> dict | None:
+    """Parses a single worksheet dynamically regardless of row positions."""
     rows = list(sheet.iter_rows(values_only=True))
     if not rows:
-        raise ValueError("The uploaded Excel file is empty.")
+        return None
 
     col_to_day = {}
     dates_by_day = {}
     day_labels = {}
+    parsed_dates = []
 
-    date_row = rows[0] if len(rows) > 0 else []
-    for r in rows[:5]:
-        if r and any(normalize_day_name(c) in DAYS_ORDER for c in r[1:8] if c):
-            for col_idx in range(1, min(8, len(r))):
-                raw_day = r[col_idx]
-                day_key = normalize_day_name(raw_day)
-                if day_key in DAYS_ORDER:
-                    col_to_day[col_idx] = day_key
-                    day_labels[day_key] = str(raw_day).strip()
-                    if col_idx < len(date_row) and date_row[col_idx] is not None:
-                        val = date_row[col_idx]
-                        if isinstance(val, datetime):
-                            dates_by_day[day_key] = val.strftime("%d/%m/%y")
-                        else:
-                            dates_by_day[day_key] = str(val).strip()
+    date_row = None
+    for idx, r in enumerate(rows[:12]):
+        if not r:
+            continue
+        day_matches = {
+            c_i: normalize_day_name(r[c_i])
+            for c_i in range(1, min(10, len(r)))
+            if normalize_day_name(r[c_i])
+        }
+        if len(day_matches) >= 4:
+            col_to_day = day_matches
+            for c_i, d_k in day_matches.items():
+                day_labels[d_k] = str(r[c_i]).strip()
+            if idx > 0:
+                date_row = rows[idx - 1]
             break
 
     if not col_to_day:
-        for idx, day_key in enumerate(DAYS_ORDER, start=1):
-            col_to_day[idx] = day_key
-            day_labels[day_key] = day_key
+        return None
+
+    if date_row:
+        for c_i, d_k in col_to_day.items():
+            if c_i < len(date_row) and date_row[c_i] is not None:
+                d_obj, d_str = parse_date_cell(date_row[c_i])
+                if d_str:
+                    dates_by_day[d_k] = d_str
+                if d_obj:
+                    parsed_dates.append(d_obj)
 
     meals = {
         day: {
             "breakfast": [],
             "lunch": [],
+            "bowled_over": [],
             "food_trotters": [],
             "snacks": [],
             "dinner": [],
@@ -1119,21 +1129,44 @@ def parse_menu_excel(file_path: str) -> dict:
     current_section = None
     sub_row_counter = 0
 
-    for row in rows[1:]:
-        if not row or all(cell is None or str(cell).strip() == "" for cell in row[:8]):
+    for row in rows:
+        if not row or all(cell is None or str(cell).strip() == "" for cell in row[:10]):
             continue
 
-        first_col = str(row[0]).strip() if row[0] is not None else ""
-        first_col_lower = first_col.lower()
+        first_col = " ".join(str(row[0]).strip().split()) if row[0] is not None else ""
+        day_header_count = sum(
+            1 for c_i in col_to_day
+            if c_i < len(row) and normalize_day_name(row[c_i]) in DAYS_ORDER
+        )
+        sec = classify_section_header(first_col)
 
-        second_col_day = normalize_day_name(row[1]) if len(row) > 1 and row[1] else ""
-        if first_col_lower in SECTION_HEADERS and second_col_day in DAYS_ORDER:
-            current_section = SECTION_HEADERS[first_col_lower]
+        # Case 1: Section header row with MONDAY..SUNDAY across columns
+        if day_header_count >= 3:
+            if sec:
+                current_section = sec
+                sub_row_counter = 0
+            continue
+
+        # Case 2: Standalone section title row in Column A with empty cells in B..H
+        non_empty_days = sum(
+            1 for c_i in col_to_day
+            if c_i < len(row) and row[c_i] is not None and str(row[c_i]).strip() != ""
+        )
+        if sec and non_empty_days == 0:
+            current_section = sec
             sub_row_counter = 0
             continue
 
         if not current_section:
             continue
+
+        # Case 3: Single inline row inside a meal block labeled e.g. "Bowled Over Lunch" or "Food Trotters"
+        row_sec_override = classify_section_header(first_col)
+        active_sec = (
+            row_sec_override
+            if row_sec_override in ("lunch_food_trotters", "lunch_bowled_over", "dinner_perfect_jodi")
+            else current_section
+        )
 
         sub_row_counter += 1
 
@@ -1145,43 +1178,80 @@ def parse_menu_excel(file_path: str) -> dict:
                 continue
             item_text = " ".join(str(val).strip().split())
 
-            if current_section == "breakfast":
+            if active_sec == "breakfast":
                 category = first_col or f"Item {sub_row_counter}"
                 meals[day_key]["breakfast"].append((category, item_text))
 
-            elif current_section == "lunch":
+            elif active_sec == "lunch":
                 category = first_col or f"Item {sub_row_counter}"
                 meals[day_key]["lunch"].append((category, item_text))
 
-            elif current_section == "lunch_bowled_over" and INCLUDE_BOWLED_OVER_IN_LUNCH:
-                category = first_col or "Bowled Over Lunch"
-                meals[day_key]["lunch"].append((category, item_text))
+            elif active_sec == "lunch_bowled_over" and INCLUDE_BOWLED_OVER_IN_LUNCH:
+                cat_clean = first_col if first_col.lower() not in ("bowled over", "bowled over lunch", "lunch") else ""
+                label_item = f"{cat_clean}: {item_text}" if cat_clean else item_text
+                meals[day_key]["bowled_over"].append(label_item)
 
-            elif current_section == "lunch_food_trotters":
-                meals[day_key]["food_trotters"].append(item_text)
+            elif active_sec == "lunch_food_trotters":
+                cat_clean = first_col if first_col.lower() not in ("food trotters", "food trottrers", "lunch") else ""
+                label_item = f"{cat_clean}: {item_text}" if cat_clean else item_text
+                meals[day_key]["food_trotters"].append(label_item)
 
-            elif current_section == "snacks":
+            elif active_sec == "snacks":
                 category = first_col or f"Snack {sub_row_counter}"
                 if not INCLUDE_JAIN and "jain" in category.lower():
                     continue
                 meals[day_key]["snacks"].append((category, item_text))
 
-            elif current_section == "dinner":
+            elif active_sec == "dinner":
                 category = first_col or f"Item {sub_row_counter}"
                 meals[day_key]["dinner"].append((category, item_text))
 
-            elif current_section == "dinner_perfect_jodi":
-                meals[day_key]["perfect_jodi"].append(item_text)
+            elif active_sec == "dinner_perfect_jodi":
+                cat_clean = (
+                    first_col
+                    if first_col.lower() not in ("dinner", "perfect jodi", "perfect jodi ( dinner)", "perfect jodi / bowled over")
+                    else ""
+                )
+                label_item = f"{cat_clean}: {item_text}" if cat_clean else item_text
+                meals[day_key]["perfect_jodi"].append(label_item)
 
+    max_date = max(parsed_dates) if parsed_dates else date.min
     return {
+        "sheet_title": sheet.title,
+        "max_date": max_date,
         "dates": dates_by_day,
         "day_labels": day_labels,
         "meals": meals,
     }
 
 
+def parse_menu_excel(file_path: str) -> dict:
+    """
+    Scans all worksheets in the uploaded Excel workbook and automatically selects
+    the worksheet with the latest/current week's dates.
+    """
+    wb = openpyxl.load_workbook(file_path, data_only=True)
+    candidates = []
+    for idx, name in enumerate(wb.sheetnames):
+        parsed = _parse_single_worksheet(wb[name])
+        if parsed is not None:
+            parsed["sheet_index"] = idx
+            candidates.append(parsed)
+
+    if not candidates:
+        raise ValueError("Could not find a valid Monday–Sunday menu table in the Excel file.")
+
+    # Pick the worksheet with the newest dates (or the last sheet in the workbook if dates are unparsed)
+    best = max(candidates, key=lambda c: (c["max_date"], c["sheet_index"]))
+    return {
+        "dates": best["dates"],
+        "day_labels": best["day_labels"],
+        "meals": best["meals"],
+    }
+
+
 def get_active_menu_data() -> dict:
-    """Loads the latest uploaded current_menu.xlsx, or falls back to the pre-loaded Oct 19-25 menu."""
+    """Loads the latest uploaded current_menu.xlsx, or falls back to the pre-loaded Nov 16-22 menu."""
     if os.path.exists(MENU_FILE_PATH):
         try:
             return parse_menu_excel(MENU_FILE_PATH)
@@ -1232,28 +1302,40 @@ def format_meal_message(menu_data: dict, day_key: str, meal_type: str) -> str:
             items_str = " | ".join(grouped[category])
             lines.append(f"• *{category}:* {items_str}")
 
-    # Append Food Trotters to Lunch
-    if meal_type == "lunch" and INCLUDE_FOOD_TROTTERS_IN_LUNCH:
-        ft_items = [
-            item for item in day_meals.get("food_trotters", [])
-            if INCLUDE_NON_VEG or not is_non_veg_entry("Food Trotters", item)
-        ]
-        lines.append("")
-        lines.append("🍴 *FOOD TROTTERS:*")
-        if ft_items:
-            for item in ft_items:
-                lines.append(f"  ◦ {item}")
-        else:
-            lines.append("  _None today_")
+    # Always include Bowled Over & Food Trotters in Lunch (wherever they appeared in the sheet)
+    if meal_type == "lunch":
+        if INCLUDE_BOWLED_OVER_IN_LUNCH:
+            bo_items = [
+                item for item in day_meals.get("bowled_over", [])
+                if INCLUDE_NON_VEG or not is_non_veg_entry("Bowled Over", item)
+            ]
+            if bo_items:
+                lines.append("")
+                lines.append("🥣 *BOWLED OVER:*")
+                for item in bo_items:
+                    lines.append(f"  ◦ {item}")
 
-    # Append Perfect Jodi / Bowled Over to Dinner
+        if INCLUDE_FOOD_TROTTERS_IN_LUNCH:
+            ft_items = [
+                item for item in day_meals.get("food_trotters", [])
+                if INCLUDE_NON_VEG or not is_non_veg_entry("Food Trotters", item)
+            ]
+            lines.append("")
+            lines.append("🍴 *FOOD TROTTERS:*")
+            if ft_items:
+                for item in ft_items:
+                    lines.append(f"  ◦ {item}")
+            else:
+                lines.append("  _None today_")
+
+    # Always include Perfect Jodi in Dinner (wherever it appeared in the sheet)
     if meal_type == "dinner" and INCLUDE_PERFECT_JODI_IN_DINNER:
         pj_items = [
             item for item in day_meals.get("perfect_jodi", [])
             if INCLUDE_NON_VEG or not is_non_veg_entry("Perfect Jodi", item)
         ]
         lines.append("")
-        lines.append("🍛 *PERFECT JODI / BOWLED OVER:*")
+        lines.append("🍛 *PERFECT JODI:*")
         if pj_items:
             for item in pj_items:
                 lines.append(f"  ◦ {item}")
@@ -1309,7 +1391,7 @@ def resolve_user_query(incoming_text: str, menu_data: dict, now_ist: datetime) -
         d_key, m_type = get_next_upcoming_meal(now_ist)
         return format_meal_message(menu_data, d_key, m_type)
 
-    if "food trotter" in cleaned or "trotter" in cleaned:
+    if "food trotter" in cleaned or "trotter" in cleaned or "bowled over" in cleaned:
         return format_meal_message(menu_data, today_key, "lunch")
 
     if "perfect jodi" in cleaned or "jodi" in cleaned:
@@ -1405,7 +1487,7 @@ def scheduler_loop():
 
 
 # ---------------------------------------------------------------------------
-# Auto-Generated Node.js Baileys QR-Code Bridge (v3 - Strictly "Mess Menu" Group)
+# Auto-Generated Node.js Baileys QR-Code Bridge (v4 - Strictly "Mess Menu" Group)
 # ---------------------------------------------------------------------------
 NODE_BRIDGE_SCRIPT = r"""
 const {
@@ -1809,7 +1891,7 @@ def start_node_qr_bridge():
 
     while True:
         logger.info("Starting WhatsApp QR-Code Bridge process...")
-        add_bridge_log("🚀 Starting WhatsApp QR bridge process (v3 — 'Mess Menu' Group Only)...")
+        add_bridge_log("🚀 Starting WhatsApp QR bridge process (v4 — Dynamic Parser + 'Mess Menu' Group)...")
         proc = subprocess.Popen(["node", "wa_bridge.js"])
         exit_code = proc.wait()
         with STATE_LOCK:
@@ -1876,7 +1958,7 @@ class BotWebServer(BaseHTTPRequestHandler):
             )
             status_html = f"""
             <div style="background:#dcfce7;color:#166534;padding:16px;border-radius:10px;margin-bottom:20px;">
-                <strong>🟢 Connected to WhatsApp! (v3 — "Mess Menu" Group Only)</strong> ({html.escape(self_jid)})<br>
+                <strong>🟢 Connected to WhatsApp! (v4 — Dynamic Parser + "Mess Menu" Group)</strong> ({html.escape(self_jid)})<br>
                 {group_badge}<br>
                 <small><b>Pending in Outbox: {outbox_count}</b></small><br><br>
                 Open your <b>"Mess Menu"</b> WhatsApp group and text <code>menu</code>, <code>breakfast</code>, <code>lunch</code>, <code>snacks</code>, <code>dinner</code>, or <code>next</code>!<br><br>
@@ -1905,7 +1987,7 @@ class BotWebServer(BaseHTTPRequestHandler):
 <html>
 <head>
     <meta charset="utf-8">
-    <title>BITSoM Mess Menu WhatsApp Bot (v3)</title>
+    <title>BITSoM Mess Menu WhatsApp Bot (v4)</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         body {{ font-family: system-ui, -apple-system, sans-serif; max-width: 680px; margin: 30px auto; padding: 0 16px; background: #f8fafc; color: #0f172a; }}
@@ -1916,7 +1998,7 @@ class BotWebServer(BaseHTTPRequestHandler):
 </head>
 <body>
     <div class="card">
-        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu Bot (v3 — "Mess Menu" Group Only)</h2>
+        <h2 style="margin-top:0;">🍽️ BITSoM Mess Menu Bot (v4 — Dynamic Parser + "Mess Menu" Group)</h2>
         {sent_banner}
         {status_html}
         <p><b>Daily Schedule (IST):</b> Breakfast 06:00 AM • Lunch 11:00 AM • Snacks 03:00 PM • Dinner 07:00 PM • Monday Upload Reminder 09:00 AM</p>
